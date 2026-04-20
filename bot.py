@@ -387,11 +387,16 @@ async def get_best_gp_image_attachment(message: discord.Message) -> Optional[dis
     if not image_attachments:
         return None
 
-    # Si hay una sola imagen, usar esa
-    if len(image_attachments) == 1:
-        return image_attachments[0]
+    # Prioridad 1: nombres que parezcan screenshot del pack
+    preferred_keywords = ["screenshot", "screen", "pack", "packs", "godpack", "gp"]
 
-    # Si hay varias, elegir la más probable según dimensiones
+    for att in image_attachments:
+        name = att.filename.lower()
+        if any(k in name for k in preferred_keywords):
+            print(f"[DEBUG] Attachment elegido por nombre: {att.filename}")
+            return att
+
+    # Si no encuentra por nombre, usar la imagen más grande horizontal o casi cuadrada
     best_att = None
     best_score = None
 
@@ -399,21 +404,26 @@ async def get_best_gp_image_attachment(message: discord.Message) -> Optional[dis
         try:
             img = await download_pil_image(att)
             w, h = img.size
-
-            # Penaliza imágenes muy pequeñas o demasiado verticales tipo perfil
             aspect = w / h if h else 1.0
 
-            # Queremos favorecer una imagen más parecida al grid del GP
-            # el grid del ejemplo es más ancho que alto o casi cuadrado
-            score = abs(w - 487) + abs(h - 427) + (abs(aspect - (487 / 427)) * 100)
+            # favorece imágenes de pack, no imágenes verticales tipo perfil
+            penalty = 0
+            if aspect < 0.7:
+                penalty += 1000
+
+            score = abs(w - 487) + abs(h - 427) + abs(aspect - (487 / 427)) * 100 + penalty
+
+            print(f"[DEBUG] Attachment candidato: {att.filename} size={w}x{h} score={score}")
 
             if best_score is None or score < best_score:
                 best_score = score
                 best_att = att
-        except Exception:
-            continue
+        except Exception as e:
+            print(f"[WARN] Error analizando attachment {att.filename}: {e}")
 
-    return best_att if best_att else image_attachments[0]
+    if best_att:
+        print(f"[DEBUG] Attachment elegido por tamaño: {best_att.filename}")
+    return best_att
 
 
 def is_target_message(message: discord.Message) -> bool:
