@@ -98,33 +98,7 @@ class TemplateCard:
         hist = cv2.normalize(hist, hist).flatten()
         return hist
 
-print(f"[INFO] BASE_DIR real: {BASE_DIR}")
 
-print("[INFO] Contenido real de BASE_DIR:")
-for p in BASE_DIR.iterdir():
-    print(f"  - {p.name} | dir={p.is_dir()}")
-
-print("[INFO] Contenido real de cards_detect:")
-if DETECT_DIR.exists():
-    found_any = False
-    for p in DETECT_DIR.iterdir():
-        found_any = True
-        print(f"  - {p.name} | dir={p.is_dir()} | size={p.stat().st_size if p.is_file() else 'dir'}")
-    if not found_any:
-        print("  - (vacío)")
-else:
-    print("  - no existe")
-
-print("[INFO] Contenido real de cards_hd:")
-if HD_DIR.exists():
-    found_any = False
-    for p in HD_DIR.iterdir():
-        found_any = True
-        print(f"  - {p.name} | dir={p.is_dir()} | size={p.stat().st_size if p.is_file() else 'dir'}")
-    if not found_any:
-        print("  - (vacío)")
-else:
-    print("  - no existe")
 # =========================================================
 # CARGA DE TEMPLATES
 # =========================================================
@@ -443,18 +417,18 @@ async def get_best_gp_image_attachment(message: discord.Message) -> Optional[dis
 
 
 def is_target_message(message: discord.Message) -> bool:
-    if not message.author.bot:
+    # Debe venir de webhook
+    if message.webhook_id is None:
         return False
 
-    if CLIENT_ID and message.author.id != CLIENT_ID:
-        return False
-
+    # Si quieres filtrar por canal
     if TARGET_CHANNEL_ID and message.channel.id != TARGET_CHANNEL_ID:
         return False
 
     content = message.content or ""
     content_lower = content.lower()
 
+    # Si quieres filtrar por texto trigger
     return any(trigger.lower() in content_lower for trigger in TRIGGER_TEXTS)
 
 
