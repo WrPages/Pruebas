@@ -495,12 +495,21 @@ async def on_message(message: discord.Message):
             return
 
         gp_attachment = await get_best_gp_image_attachment(message)
+        print(f"[DEBUG] gp_attachment seleccionado: {gp_attachment.filename if gp_attachment else None}")
         if gp_attachment is None:
             print("[INFO] Mensaje detectado pero sin imagen válida.")
             return
 
         source_img = await download_pil_image(gp_attachment)
+        print(f"[DEBUG] source_img size: {source_img.size}")
         slots = extract_slots(source_img)
+        debug_source = OUTPUT_DIR / f"debug_source_{message.id}.png"
+source_img.save(debug_source)
+
+for i, slot in enumerate(slots):
+    slot_path = OUTPUT_DIR / f"debug_slot_{message.id}_{i+1}.png"
+    cv_to_pil(slot).save(slot_path)
+    print(f"[DEBUG] Guardado slot {i+1}: {slot_path}")
 
         detected_cards: List[Optional[TemplateCard]] = []
         debug_lines: List[str] = []
@@ -508,7 +517,7 @@ async def on_message(message: discord.Message):
         for idx, slot in enumerate(slots):
             card, ranking = detect_card(slot, TEMPLATES)
             detected_cards.append(card)
-
+            print(f"[DEBUG] Slot {idx+1} ranking: {ranking[:5]}")
             if card:
                 debug_lines.append(f"Slot {idx + 1}: {card.name}")
             else:
@@ -519,9 +528,19 @@ async def on_message(message: discord.Message):
 
         found_count = sum(1 for c in detected_cards if c is not None)
 
-        if found_count == 0:
-            print("[INFO] No se detectó ninguna carta.")
-            return
+     if found_count == 0:
+    print("[INFO] No se detectó ninguna carta.")
+
+    debug_sheet = create_debug_contact_sheet(source_img, slots, detected_cards)
+    out_debug = OUTPUT_DIR / f"gp_debug_{message.id}.png"
+    debug_sheet.save(out_debug)
+
+    await message.reply(
+        "No se detectó ninguna carta. Revisa la imagen debug.",
+        file=discord.File(str(out_debug), filename="gp_debug.png"),
+        mention_author=False
+    )
+    return
 
         hd_canvas = build_hd_canvas(detected_cards)
         debug_sheet = create_debug_contact_sheet(source_img, slots, detected_cards)
