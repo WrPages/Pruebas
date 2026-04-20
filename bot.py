@@ -21,8 +21,7 @@ TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "0"))
 # =========================================================
 
 CARDS_BASE = "/app"
-BASE_DIR = Path(__file__).resolve().parent / "Pruebas"
-
+BASE_DIR = Path(__file__).resolve().parent
 DETECT_DIR = BASE_DIR / "cards_detect"
 HD_DIR = BASE_DIR / "cards_hd"
 OUTPUT_DIR = BASE_DIR / "output"
