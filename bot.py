@@ -142,15 +142,27 @@ def load_templates() -> List[TemplateCard]:
     if not HD_DIR.exists():
         raise RuntimeError(f"No existe la carpeta cards_hd: {HD_DIR}")
 
-    detect_files = []
-    for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp"):
-        detect_files.extend(DETECT_DIR.glob(ext))
+    valid_suffixes = {".png", ".jpg", ".jpeg", ".webp"}
 
-    hd_files = []
-    for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp"):
-        hd_files.extend(HD_DIR.glob(ext))
+    detect_files = sorted(
+        [
+            p for p in DETECT_DIR.iterdir()
+            if p.is_file() and p.suffix.lower() in valid_suffixes
+        ],
+        key=lambda p: p.name.lower()
+    )
+
+    hd_files = sorted(
+        [
+            p for p in HD_DIR.iterdir()
+            if p.is_file() and p.suffix.lower() in valid_suffixes
+        ],
+        key=lambda p: p.name.lower()
+    )
 
     print("[INFO] Archivos en cards_detect:")
+    if not detect_files:
+        print("  - (vacío)")
     for f in detect_files:
         try:
             print(f"  - {f.name} ({f.stat().st_size} bytes)")
@@ -158,6 +170,8 @@ def load_templates() -> List[TemplateCard]:
             print(f"  - {f.name} (sin info de tamaño)")
 
     print("[INFO] Archivos en cards_hd:")
+    if not hd_files:
+        print("  - (vacío)")
     for f in hd_files:
         try:
             print(f"  - {f.name} ({f.stat().st_size} bytes)")
@@ -172,21 +186,15 @@ def load_templates() -> List[TemplateCard]:
             continue
 
         possible_hd_files = [
-            HD_DIR / f"{name}.png",
-            HD_DIR / f"{name}.jpg",
-            HD_DIR / f"{name}.jpeg",
-            HD_DIR / f"{name}.webp",
+            p for p in hd_files
+            if p.stem.lower() == name.lower()
         ]
 
-        hd_file = None
-        for p in possible_hd_files:
-            if p.exists():
-                hd_file = p
-                break
-
-        if hd_file is None:
+        if not possible_hd_files:
             print(f"[WARN] No existe versión HD para {name}")
             continue
+
+        hd_file = possible_hd_files[0]
 
         if hd_file.stat().st_size == 0:
             print(f"[WARN] Archivo HD vacío, se omite: {hd_file.name}")
