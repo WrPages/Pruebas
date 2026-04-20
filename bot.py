@@ -442,14 +442,13 @@ async def on_ready():
 @client.event
 async def on_message(message: discord.Message):
     try:
-   
         if message.author.id == client.user.id:
             return
 
-         if not TEMPLATES:
+        if not TEMPLATES:
             print("[WARN] No hay templates cargados.")
             return
-        
+
         if not is_target_message(message):
             return
 
