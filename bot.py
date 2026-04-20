@@ -462,107 +462,69 @@ async def on_message(message: discord.Message):
     try:
         print(
             f"[DEBUG] on_message author={message.author} "
-            f"author_id={message.author.id} "
-            f"bot={message.author.bot} "
             f"webhook_id={message.webhook_id} "
-            f"channel_id={message.channel.id} "
-            f"content={repr(message.content)} "
-            f"attachments={[a.filename for a in message.attachments]}"
+            f"channel_id={message.channel.id}"
         )
 
         if message.author.id == client.user.id:
-            print("[DEBUG] Ignorado: mensaje del propio bot")
             return
 
         if not TEMPLATES:
-            print("[DEBUG] Ignorado: no hay templates cargados")
+            print("[DEBUG] No hay templates")
             return
 
         if not is_target_message(message):
-            print("[DEBUG] Ignorado: no coincide con filtro webhook/canal/trigger")
+            print("[DEBUG] No es mensaje objetivo")
             return
 
-        print("[DEBUG] Mensaje webhook objetivo detectado, procesando...")
-        
-        if message.author.id == client.user.id:
-            return
-
-        if not TEMPLATES:
-            print("[WARN] No hay templates cargados.")
-            return
-
-        if not is_target_message(message):
-            return
+        print("[DEBUG] Procesando mensaje...")
 
         gp_attachment = await get_best_gp_image_attachment(message)
-        print(f"[DEBUG] gp_attachment seleccionado: {gp_attachment.filename if gp_attachment else None}")
+
         if gp_attachment is None:
-            print("[INFO] Mensaje detectado pero sin imagen válida.")
+            print("[DEBUG] No attachment válido")
             return
 
+        print(f"[DEBUG] Usando attachment: {gp_attachment.filename}")
+
         source_img = await download_pil_image(gp_attachment)
-        print(f"[DEBUG] source_img size: {source_img.size}")
-        slots = extract_slots(source_img)
+
+        print(f"[DEBUG] Tamaño imagen: {source_img.size}")
+
+        # ✅ DEBUG BIEN INDENTADO
         debug_source = OUTPUT_DIR / f"debug_source_{message.id}.png"
-source_img.save(debug_source)
+        source_img.save(debug_source)
 
-for i, slot in enumerate(slots):
-    slot_path = OUTPUT_DIR / f"debug_slot_{message.id}_{i+1}.png"
-    cv_to_pil(slot).save(slot_path)
-    print(f"[DEBUG] Guardado slot {i+1}: {slot_path}")
+        slots = extract_slots(source_img)
 
-        detected_cards: List[Optional[TemplateCard]] = []
-        debug_lines: List[str] = []
+        for i, slot in enumerate(slots):
+            slot_path = OUTPUT_DIR / f"debug_slot_{message.id}_{i+1}.png"
+            cv_to_pil(slot).save(slot_path)
+            print(f"[DEBUG] Slot {i+1} guardado")
+
+        detected_cards = []
 
         for idx, slot in enumerate(slots):
             card, ranking = detect_card(slot, TEMPLATES)
+
+            print(f"[DEBUG] Slot {idx+1} ranking: {ranking[:3]}")
+
             detected_cards.append(card)
-            print(f"[DEBUG] Slot {idx+1} ranking: {ranking[:5]}")
-            if card:
-                debug_lines.append(f"Slot {idx + 1}: {card.name}")
-            else:
-                debug_lines.append(f"Slot {idx + 1}: no detectada")
 
-            if ranking:
-                debug_lines.append(f"Top {idx + 1}: {ranking[:3]}")
+        found_count = sum(1 for c in detected_cards if c)
 
-        found_count = sum(1 for c in detected_cards if c is not None)
+        print(f"[DEBUG] Detectadas: {found_count}/5")
 
-     if found_count == 0:
-    print("[INFO] No se detectó ninguna carta.")
-
-    debug_sheet = create_debug_contact_sheet(source_img, slots, detected_cards)
-    out_debug = OUTPUT_DIR / f"gp_debug_{message.id}.png"
-    debug_sheet.save(out_debug)
-
-    await message.reply(
-        "No se detectó ninguna carta. Revisa la imagen debug.",
-        file=discord.File(str(out_debug), filename="gp_debug.png"),
-        mention_author=False
-    )
-    return
-
-        hd_canvas = build_hd_canvas(detected_cards)
+        # aunque falle, manda debug
         debug_sheet = create_debug_contact_sheet(source_img, slots, detected_cards)
-
-        out_hd = OUTPUT_DIR / f"gp_hd_{message.id}.png"
         out_debug = OUTPUT_DIR / f"gp_debug_{message.id}.png"
-
-        hd_canvas.save(out_hd)
         debug_sheet.save(out_debug)
 
-        reply_text = "Reconstrucción HD del GP\n\n"
-        reply_text += f"Detectadas: {found_count}/5\n"
-        reply_text += "```" + "\n".join(debug_lines[:20])[:1800] + "```"
-
-        files = [
-            discord.File(str(out_hd), filename="gp_hd.png"),
-            discord.File(str(out_debug), filename="gp_debug.png"),
-        ]
-
-        await message.reply(reply_text, files=files, mention_author=False)
-
-        print(f"[INFO] Procesado mensaje {message.id} - detectadas {found_count}/5")
+        await message.reply(
+            f"Detectadas: {found_count}/5",
+            file=discord.File(str(out_debug), filename="debug.png"),
+            mention_author=False
+        )
 
     except Exception as e:
         print(f"[ERROR] on_message: {e}")
