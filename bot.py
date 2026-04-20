@@ -98,7 +98,33 @@ class TemplateCard:
         hist = cv2.normalize(hist, hist).flatten()
         return hist
 
+print(f"[INFO] BASE_DIR real: {BASE_DIR}")
 
+print("[INFO] Contenido real de BASE_DIR:")
+for p in BASE_DIR.iterdir():
+    print(f"  - {p.name} | dir={p.is_dir()}")
+
+print("[INFO] Contenido real de cards_detect:")
+if DETECT_DIR.exists():
+    found_any = False
+    for p in DETECT_DIR.iterdir():
+        found_any = True
+        print(f"  - {p.name} | dir={p.is_dir()} | size={p.stat().st_size if p.is_file() else 'dir'}")
+    if not found_any:
+        print("  - (vacío)")
+else:
+    print("  - no existe")
+
+print("[INFO] Contenido real de cards_hd:")
+if HD_DIR.exists():
+    found_any = False
+    for p in HD_DIR.iterdir():
+        found_any = True
+        print(f"  - {p.name} | dir={p.is_dir()} | size={p.stat().st_size if p.is_file() else 'dir'}")
+    if not found_any:
+        print("  - (vacío)")
+else:
+    print("  - no existe")
 # =========================================================
 # CARGA DE TEMPLATES
 # =========================================================
