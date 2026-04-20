@@ -20,7 +20,8 @@ TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "0"))
 # RUTAS
 # =========================================================
 
-BASE_DIR = Path(__file__).resolve().parent
+CARDS_BASE = os.environ.get("CARDS_BASE_PATH", "/app")
+BASE_DIR = Path(CARDS_BASE)
 DETECT_DIR = BASE_DIR / "cards_detect"
 HD_DIR = BASE_DIR / "cards_hd"
 OUTPUT_DIR = BASE_DIR / "output"
@@ -179,7 +180,11 @@ def load_templates() -> List[TemplateCard]:
     return templates
 
 
-TEMPLATES = load_templates()
+try:
+    TEMPLATES = load_templates()
+except Exception as e:
+    print(f"[ERROR] No se pudieron cargar templates: {e}")
+    TEMPLATES = []
 
 # =========================================================
 # HELPERS DE IMAGEN
@@ -437,6 +442,9 @@ async def on_ready():
 @client.event
 async def on_message(message: discord.Message):
     try:
+        if not TEMPLATES:
+    print("[WARN] No hay templates cargados.")
+    return
         if message.author.id == client.user.id:
             return
 
