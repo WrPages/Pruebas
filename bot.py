@@ -20,7 +20,7 @@ TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "0"))
 # RUTAS
 # =========================================================
 
-CARDS_BASE = os.environ.get("CARDS_BASE_PATH", "/data")
+CARDS_BASE = os.environ.get("CARDS_BASE_PATH", "/app")
 BASE_DIR = Path(CARDS_BASE)
 DETECT_DIR = BASE_DIR / "cards_detect"
 HD_DIR = BASE_DIR / "cards_hd"
