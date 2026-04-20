@@ -105,16 +105,44 @@ class TemplateCard:
 def load_templates() -> List[TemplateCard]:
     templates: List[TemplateCard] = []
 
+    print(f"[INFO] BASE_DIR: {BASE_DIR}")
+    print(f"[INFO] DETECT_DIR existe: {DETECT_DIR.exists()} -> {DETECT_DIR}")
+    print(f"[INFO] HD_DIR existe: {HD_DIR.exists()} -> {HD_DIR}")
+
     if not DETECT_DIR.exists():
         raise RuntimeError(f"No existe la carpeta cards_detect: {DETECT_DIR}")
 
     if not HD_DIR.exists():
         raise RuntimeError(f"No existe la carpeta cards_hd: {HD_DIR}")
 
-    detect_files = list(DETECT_DIR.glob("*.png")) + list(DETECT_DIR.glob("*.jpg")) + list(DETECT_DIR.glob("*.jpeg")) + list(DETECT_DIR.glob("*.webp"))
+    detect_files = []
+    for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp"):
+        detect_files.extend(DETECT_DIR.glob(ext))
+
+    hd_files = []
+    for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp"):
+        hd_files.extend(HD_DIR.glob(ext))
+
+    print("[INFO] Archivos en cards_detect:")
+    for f in detect_files:
+        try:
+            print(f"  - {f.name} ({f.stat().st_size} bytes)")
+        except Exception:
+            print(f"  - {f.name} (sin info de tamaño)")
+
+    print("[INFO] Archivos en cards_hd:")
+    for f in hd_files:
+        try:
+            print(f"  - {f.name} ({f.stat().st_size} bytes)")
+        except Exception:
+            print(f"  - {f.name} (sin info de tamaño)")
 
     for detect_file in detect_files:
         name = detect_file.stem
+
+        if detect_file.stat().st_size == 0:
+            print(f"[WARN] Archivo detect vacío, se omite: {detect_file.name}")
+            continue
 
         possible_hd_files = [
             HD_DIR / f"{name}.png",
@@ -130,18 +158,24 @@ def load_templates() -> List[TemplateCard]:
                 break
 
         if hd_file is None:
-            print(f"[WARN] No existe versión HD para {name}, se omite.")
+            print(f"[WARN] No existe versión HD para {name}")
+            continue
+
+        if hd_file.stat().st_size == 0:
+            print(f"[WARN] Archivo HD vacío, se omite: {hd_file.name}")
             continue
 
         try:
             templates.append(TemplateCard(name, detect_file, hd_file))
+            print(f"[OK] Template cargado: {name}")
         except Exception as e:
             print(f"[WARN] Error cargando template {name}: {e}")
+
+    print(f"[INFO] Total templates válidos: {len(templates)}")
 
     if not templates:
         raise RuntimeError("No se cargó ningún template válido en cards_detect/ y cards_hd/")
 
-    print(f"[INFO] Templates cargados: {len(templates)}")
     return templates
 
 
