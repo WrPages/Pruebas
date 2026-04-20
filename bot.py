@@ -20,7 +20,6 @@ TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "0"))
 # RUTAS
 # =========================================================
 
-CARDS_BASE = "/app"
 BASE_DIR = Path(__file__).resolve().parent
 DETECT_DIR = BASE_DIR / "cards_detect"
 HD_DIR = BASE_DIR / "cards_hd"
@@ -32,30 +31,25 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # CONFIGURACIÓN GENERAL
 # =========================================================
 
-# Tamaño de referencia de la imagen del grid del GP
-# basado en tu ejemplo del screenshot
 REFERENCE_W = 487
 REFERENCE_H = 427
 
-# Coordenadas de las 5 cartas dentro de la imagen de preview del GP
-# formato: (x1, y1, x2, y2)
+# NUEVAS CAJAS DE PRUEBA MÁS GRANDES Y CENTRADAS
+# Ajustables después viendo el overlay
 SLOT_BOXES_REF = [
-    (18, 188, 78, 268),    # slot 1
-    (101, 188, 161, 268),  # slot 2
-    (183, 188, 243, 268),  # slot 3
-    (58, 302, 118, 382),   # slot 4
-    (145, 302, 205, 382),  # slot 5
+    (12, 95, 112, 235),    # slot 1
+    (124, 95, 224, 235),   # slot 2
+    (236, 95, 336, 235),   # slot 3
+    (68, 245, 168, 385),   # slot 4
+    (180, 245, 280, 385),  # slot 5
 ]
 
-# Tamaño del canvas de salida
 CANVAS_W = 2200
 CANVAS_H = 2000
 
-# Tamaño de las cartas HD en la imagen final
 CARD_W = 640
 CARD_H = 890
 
-# Posiciones donde se dibujan las 5 cartas HD en la salida final
 DRAW_SLOTS = [
     (120, 50),
     (780, 50),
@@ -88,16 +82,28 @@ class TemplateCard:
     @staticmethod
     def _load_detect_image(path: Path) -> np.ndarray:
         img = cv2.imread(str(path), cv2.IMREAD_COLOR)
-        if img is None:
-            raise ValueError(f"No se pudo cargar template detect: {path}")
-        return img
+        if img is not None:
+            return img
+
+        try:
+            pil_img = Image.open(path).convert("RGB")
+            rgb = np.array(pil_img)
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            return bgr
+        except Exception as e:
+            raise ValueError(f"No se pudo cargar template detect: {path} | detalle: {e}")
 
     @staticmethod
     def _compute_hist(img_bgr: np.ndarray) -> np.ndarray:
-        hist = cv2.calcHist([img_bgr], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
+        hist = cv2.calcHist(
+            [img_bgr],
+            [0, 1, 2],
+            None,
+            [8, 8, 8],
+            [0, 256, 0, 256, 0, 256]
+        )
         hist = cv2.normalize(hist, hist).flatten()
         return hist
-
 
 # =========================================================
 # CARGA DE TEMPLATES
@@ -236,7 +242,13 @@ def crop_slot(img_bgr: np.ndarray, box: Tuple[int, int, int, int]) -> np.ndarray
 
 
 def compute_hist(img_bgr: np.ndarray) -> np.ndarray:
-    hist = cv2.calcHist([img_bgr], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
+    hist = cv2.calcHist(
+        [img_bgr],
+        [0, 1, 2],
+        None,
+        [8, 8, 8],
+        [0, 256, 0, 256, 0, 256]
+    )
     hist = cv2.normalize(hist, hist).flatten()
     return hist
 
@@ -250,11 +262,9 @@ def compare_images(slot_bgr: np.ndarray, template: TemplateCard) -> float:
 
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
 
-    # 1) error cuadrático medio en grises
     diff = gray.astype(np.float32) - template.detect_gray.astype(np.float32)
     mse = float(np.mean(diff ** 2))
 
-    # 2) comparación de histograma color
     hist_slot = compute_hist(resized)
     hist_corr = cv2.compareHist(
         hist_slot.astype(np.float32),
@@ -263,7 +273,6 @@ def compare_images(slot_bgr: np.ndarray, template: TemplateCard) -> float:
     )
     hist_penalty = (1.0 - max(-1.0, min(1.0, hist_corr))) * 1000.0
 
-    # 3) template matching
     res = cv2.matchTemplate(gray, template.detect_gray, cv2.TM_CCOEFF_NORMED)
     match_score = float(res[0][0])
     match_penalty = (1.0 - match_score) * 1000.0
@@ -296,7 +305,6 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
     else:
         gap = 999999.0
 
-    # umbrales iniciales
     if best_score < 2500 and gap > 60:
         return best_t, top_debug
 
@@ -335,7 +343,11 @@ def build_hd_canvas(detected_cards: List[Optional[TemplateCard]]) -> Image.Image
     return canvas
 
 
-def create_debug_contact_sheet(source_img: Image.Image, slots: List[np.ndarray], detected_cards: List[Optional[TemplateCard]]) -> Image.Image:
+def create_debug_contact_sheet(
+    source_img: Image.Image,
+    slots: List[np.ndarray],
+    detected_cards: List[Optional[TemplateCard]]
+) -> Image.Image:
     thumb_w = 180
     thumb_h = 240
     margin = 20
@@ -354,13 +366,26 @@ def create_debug_contact_sheet(source_img: Image.Image, slots: List[np.ndarray],
         y = 100
 
         sheet.paste(thumb, (x, y))
-
         draw.text((x, 60), f"Slot {i + 1}", fill=(255, 255, 255))
 
         label = detected_cards[i].name if detected_cards[i] else "No detectada"
         draw.text((x, 350), label[:24], fill=(180, 220, 255))
 
     return sheet
+
+
+def create_box_overlay(source_img: Image.Image) -> Image.Image:
+    overlay = source_img.convert("RGB").copy()
+    draw = ImageDraw.Draw(overlay)
+
+    w, h = overlay.size
+
+    for i, ref_box in enumerate(SLOT_BOXES_REF):
+        x1, y1, x2, y2 = scale_box(ref_box, w, h)
+        draw.rectangle((x1, y1, x2, y2), outline=(255, 0, 0), width=4)
+        draw.text((x1 + 5, y1 + 5), f"S{i+1}", fill=(255, 255, 0))
+
+    return overlay
 
 
 def attachment_looks_like_gp_grid(att: discord.Attachment) -> bool:
@@ -370,7 +395,7 @@ def attachment_looks_like_gp_grid(att: discord.Attachment) -> bool:
     if content_type.startswith("image/"):
         return True
 
-    if filename.endswith(VALID_IMAGE_EXTENSIONS):
+    if filename.endswith(tuple(ext.lower() for ext in VALID_IMAGE_EXTENSIONS)):
         return True
 
     return False
@@ -387,7 +412,6 @@ async def get_best_gp_image_attachment(message: discord.Message) -> Optional[dis
     if not image_attachments:
         return None
 
-    # Prioridad 1: nombres que parezcan screenshot del pack
     preferred_keywords = ["screenshot", "screen", "pack", "packs", "godpack", "gp"]
 
     for att in image_attachments:
@@ -396,7 +420,6 @@ async def get_best_gp_image_attachment(message: discord.Message) -> Optional[dis
             print(f"[DEBUG] Attachment elegido por nombre: {att.filename}")
             return att
 
-    # Si no encuentra por nombre, usar la imagen más grande horizontal o casi cuadrada
     best_att = None
     best_score = None
 
@@ -406,7 +429,6 @@ async def get_best_gp_image_attachment(message: discord.Message) -> Optional[dis
             w, h = img.size
             aspect = w / h if h else 1.0
 
-            # favorece imágenes de pack, no imágenes verticales tipo perfil
             penalty = 0
             if aspect < 0.7:
                 penalty += 1000
@@ -423,24 +445,21 @@ async def get_best_gp_image_attachment(message: discord.Message) -> Optional[dis
 
     if best_att:
         print(f"[DEBUG] Attachment elegido por tamaño: {best_att.filename}")
-    return best_att
+
+    return best_att if best_att else image_attachments[0]
 
 
 def is_target_message(message: discord.Message) -> bool:
-    # Debe venir de webhook
     if message.webhook_id is None:
         return False
 
-    # Si quieres filtrar por canal
     if TARGET_CHANNEL_ID and message.channel.id != TARGET_CHANNEL_ID:
         return False
 
     content = message.content or ""
     content_lower = content.lower()
 
-    # Si quieres filtrar por texto trigger
     return any(trigger.lower() in content_lower for trigger in TRIGGER_TEXTS)
-
 
 # =========================================================
 # BOT DISCORD
@@ -462,73 +481,108 @@ async def on_message(message: discord.Message):
     try:
         print(
             f"[DEBUG] on_message author={message.author} "
+            f"author_id={message.author.id} "
+            f"bot={message.author.bot} "
             f"webhook_id={message.webhook_id} "
-            f"channel_id={message.channel.id}"
+            f"channel_id={message.channel.id} "
+            f"content={repr(message.content)} "
+            f"attachments={[a.filename for a in message.attachments]}"
         )
 
         if message.author.id == client.user.id:
+            print("[DEBUG] Ignorado: mensaje del propio bot")
             return
 
         if not TEMPLATES:
-            print("[DEBUG] No hay templates")
+            print("[DEBUG] Ignorado: no hay templates cargados")
             return
 
         if not is_target_message(message):
-            print("[DEBUG] No es mensaje objetivo")
+            print("[DEBUG] Ignorado: no coincide con filtro webhook/canal/trigger")
             return
 
-        print("[DEBUG] Procesando mensaje...")
+        print("[DEBUG] Mensaje webhook objetivo detectado, procesando...")
 
         gp_attachment = await get_best_gp_image_attachment(message)
-
         if gp_attachment is None:
-            print("[DEBUG] No attachment válido")
+            print("[DEBUG] No se encontró imagen válida en attachments")
             return
 
-        print(f"[DEBUG] Usando attachment: {gp_attachment.filename}")
+        print(f"[DEBUG] gp_attachment seleccionado: {gp_attachment.filename}")
 
         source_img = await download_pil_image(gp_attachment)
+        print(f"[DEBUG] source_img size: {source_img.size}")
 
-        print(f"[DEBUG] Tamaño imagen: {source_img.size}")
-
-        # ✅ DEBUG BIEN INDENTADO
         debug_source = OUTPUT_DIR / f"debug_source_{message.id}.png"
         source_img.save(debug_source)
+
+        box_overlay = create_box_overlay(source_img)
+        overlay_path = OUTPUT_DIR / f"box_overlay_{message.id}.png"
+        box_overlay.save(overlay_path)
 
         slots = extract_slots(source_img)
 
         for i, slot in enumerate(slots):
             slot_path = OUTPUT_DIR / f"debug_slot_{message.id}_{i+1}.png"
             cv_to_pil(slot).save(slot_path)
-            print(f"[DEBUG] Slot {i+1} guardado")
+            print(f"[DEBUG] Guardado slot {i+1}: {slot_path}")
 
-        detected_cards = []
+        detected_cards: List[Optional[TemplateCard]] = []
+        debug_lines: List[str] = []
 
         for idx, slot in enumerate(slots):
             card, ranking = detect_card(slot, TEMPLATES)
-
-            print(f"[DEBUG] Slot {idx+1} ranking: {ranking[:3]}")
+            print(f"[DEBUG] Slot {idx+1} ranking: {ranking[:5]}")
 
             detected_cards.append(card)
 
-        found_count = sum(1 for c in detected_cards if c)
+            if card:
+                debug_lines.append(f"Slot {idx + 1}: {card.name}")
+            else:
+                debug_lines.append(f"Slot {idx + 1}: no detectada")
 
+            if ranking:
+                debug_lines.append(f"Top {idx + 1}: {ranking[:3]}")
+
+        found_count = sum(1 for c in detected_cards if c is not None)
         print(f"[DEBUG] Detectadas: {found_count}/5")
 
-        # aunque falle, manda debug
         debug_sheet = create_debug_contact_sheet(source_img, slots, detected_cards)
         out_debug = OUTPUT_DIR / f"gp_debug_{message.id}.png"
         debug_sheet.save(out_debug)
 
-        await message.reply(
-            f"Detectadas: {found_count}/5",
-            file=discord.File(str(out_debug), filename="debug.png"),
-            mention_author=False
-        )
+        if found_count == 0:
+            print("[INFO] No se detectó ninguna carta.")
+
+            await message.reply(
+                "No se detectó ninguna carta. Revisa overlay y debug.",
+                files=[
+                    discord.File(str(overlay_path), filename="box_overlay.png"),
+                    discord.File(str(out_debug), filename="gp_debug.png"),
+                ],
+                mention_author=False
+            )
+            return
+
+        hd_canvas = build_hd_canvas(detected_cards)
+        out_hd = OUTPUT_DIR / f"gp_hd_{message.id}.png"
+        hd_canvas.save(out_hd)
+
+        reply_text = "Reconstrucción HD del GP\n\n"
+        reply_text += f"Detectadas: {found_count}/5\n"
+        reply_text += "```" + "\n".join(debug_lines[:20])[:1800] + "```"
+
+        files = [
+            discord.File(str(out_hd), filename="gp_hd.png"),
+            discord.File(str(overlay_path), filename="box_overlay.png"),
+            discord.File(str(out_debug), filename="gp_debug.png"),
+        ]
+
+        await message.reply(reply_text, files=files, mention_author=False)
+        print(f"[INFO] Procesado mensaje {message.id} - detectadas {found_count}/5")
 
     except Exception as e:
         print(f"[ERROR] on_message: {e}")
-
 
 # =========================================================
 # MAIN
