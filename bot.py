@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-TARGET_BOT_ID = int(os.getenv("TARGET_BOT_ID", "0"))
+CLIENT_ID = int(os.getenv("CLIENT_ID", "0"))//idbot
 TARGET_CHANNEL_ID = int(os.getenv("TARGET_CHANNEL_ID", "0"))
 
 BASE_DIR = Path(__file__).parent
@@ -293,7 +293,7 @@ def is_target_message(message: discord.Message) -> bool:
     if message.author.bot is False:
         return False
 
-    if TARGET_BOT_ID and message.author.id != TARGET_BOT_ID:
+    if CLIENT_ID and message.author.id != CLIENT_ID:
         return False
 
     if TARGET_CHANNEL_ID and message.channel.id != TARGET_CHANNEL_ID:
