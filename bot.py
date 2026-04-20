@@ -450,6 +450,30 @@ async def on_ready():
 @client.event
 async def on_message(message: discord.Message):
     try:
+        print(
+            f"[DEBUG] on_message author={message.author} "
+            f"author_id={message.author.id} "
+            f"bot={message.author.bot} "
+            f"webhook_id={message.webhook_id} "
+            f"channel_id={message.channel.id} "
+            f"content={repr(message.content)} "
+            f"attachments={[a.filename for a in message.attachments]}"
+        )
+
+        if message.author.id == client.user.id:
+            print("[DEBUG] Ignorado: mensaje del propio bot")
+            return
+
+        if not TEMPLATES:
+            print("[DEBUG] Ignorado: no hay templates cargados")
+            return
+
+        if not is_target_message(message):
+            print("[DEBUG] Ignorado: no coincide con filtro webhook/canal/trigger")
+            return
+
+        print("[DEBUG] Mensaje webhook objetivo detectado, procesando...")
+        
         if message.author.id == client.user.id:
             return
 
