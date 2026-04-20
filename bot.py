@@ -26,7 +26,7 @@ DETECT_DIR = BASE_DIR / "cards_detect"
 HD_DIR = BASE_DIR / "cards_hd"
 OUTPUT_DIR = BASE_DIR / "output"
 
-OUTPUT_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # =========================================================
 # CONFIGURACIÓN GENERAL
