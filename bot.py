@@ -31,17 +31,17 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # CONFIGURACIÓN GENERAL
 # =========================================================
 
-REFERENCE_W = 487
-REFERENCE_H = 427
+REFERENCE_W = 240
+REFERENCE_H = 227
 
 # NUEVAS CAJAS DE PRUEBA MÁS GRANDES Y CENTRADAS
 # Ajustables después viendo el overlay
 SLOT_BOXES_REF = [
-    (12, 95, 112, 235),    # slot 1
-    (124, 95, 224, 235),   # slot 2
-    (236, 95, 336, 235),   # slot 3
-    (68, 245, 168, 385),   # slot 4
-    (180, 245, 280, 385),  # slot 5
+  (2, 30, 57, 111),    # slot 1
+    (48, 30, 103, 111),  # slot 2
+    (95, 30, 150, 111),  # slot 3
+    (33, 111, 88, 192),  # slot 4
+    (80, 111, 135, 192), # slot 5
 ]
 
 CANVAS_W = 2200
