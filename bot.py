@@ -254,30 +254,35 @@ def compute_hist(img_bgr: np.ndarray) -> np.ndarray:
 
 
 def compare_images(slot_bgr: np.ndarray, template: TemplateCard) -> float:
+    slot_bgr = crop_inner_card(slot_bgr)
+    template_img = crop_inner_card(template.detect_bgr)
+
     resized = cv2.resize(
         slot_bgr,
-        (template.detect_bgr.shape[1], template.detect_bgr.shape[0]),
+        (template_img.shape[1], template_img.shape[0]),
         interpolation=cv2.INTER_AREA
     )
 
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+    template_gray = cv2.cvtColor(template_img, cv2.COLOR_BGR2GRAY)
 
-    diff = gray.astype(np.float32) - template.detect_gray.astype(np.float32)
+    diff = gray.astype(np.float32) - template_gray.astype(np.float32)
     mse = float(np.mean(diff ** 2))
 
     hist_slot = compute_hist(resized)
+    hist_template = compute_hist(template_img)
     hist_corr = cv2.compareHist(
         hist_slot.astype(np.float32),
-        template.detect_hist.astype(np.float32),
+        hist_template.astype(np.float32),
         cv2.HISTCMP_CORREL
     )
     hist_penalty = (1.0 - max(-1.0, min(1.0, hist_corr))) * 1000.0
 
-    res = cv2.matchTemplate(gray, template.detect_gray, cv2.TM_CCOEFF_NORMED)
+    res = cv2.matchTemplate(gray, template_gray, cv2.TM_CCOEFF_NORMED)
     match_score = float(res[0][0])
     match_penalty = (1.0 - match_score) * 1000.0
 
-    total_score = (mse * 0.60) + (hist_penalty * 0.20) + (match_penalty * 0.20)
+    total_score = (mse * 0.55) + (hist_penalty * 0.15) + (match_penalty * 0.30)
     return total_score
 
 
@@ -316,12 +321,10 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
 
 def extract_slots(source_img: Image.Image) -> List[np.ndarray]:
     img_bgr = pil_to_cv(source_img)
-    h, w = img_bgr.shape[:2]
-
     slots = []
-    for ref_box in SLOT_BOXES_REF:
-        scaled_box = scale_box(ref_box, w, h)
-        slot = crop_slot(img_bgr, scaled_box)
+
+    for box in SLOT_BOXES:
+        slot = crop_slot(img_bgr, box)
         slots.append(slot)
 
     return slots
@@ -378,14 +381,27 @@ def create_box_overlay(source_img: Image.Image) -> Image.Image:
     overlay = source_img.convert("RGB").copy()
     draw = ImageDraw.Draw(overlay)
 
-    w, h = overlay.size
-
-    for i, ref_box in enumerate(SLOT_BOXES_REF):
-        x1, y1, x2, y2 = scale_box(ref_box, w, h)
-        draw.rectangle((x1, y1, x2, y2), outline=(255, 0, 0), width=4)
-        draw.text((x1 + 5, y1 + 5), f"S{i+1}", fill=(255, 255, 0))
+    for i, (x1, y1, x2, y2) in enumerate(SLOT_BOXES):
+        draw.rectangle((x1, y1, x2, y2), outline=(255, 0, 0), width=3)
+        draw.text((x1 + 3, y1 + 3), f"S{i+1}", fill=(255, 255, 0))
 
     return overlay
+
+def crop_inner_card(slot_bgr: np.ndarray) -> np.ndarray:
+    h, w = slot_bgr.shape[:2]
+
+    mx = int(w * 0.12)
+    my = int(h * 0.10)
+
+    x1 = mx
+    y1 = my
+    x2 = w - mx
+    y2 = h - my
+
+    if x2 <= x1 or y2 <= y1:
+        return slot_bgr
+
+    return slot_bgr[y1:y2, x1:x2].copy()
 
 
 def attachment_looks_like_gp_grid(att: discord.Attachment) -> bool:
