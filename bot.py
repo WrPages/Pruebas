@@ -37,11 +37,11 @@ REFERENCE_H = 227
 # NUEVAS CAJAS DE PRUEBA MÁS GRANDES Y CENTRADAS
 # Ajustables después viendo el overlay
 SLOT_BOXES_REF = [
-    (0, 5 , 80, 113),    # slot 1
+    (0, 5 , 78, 113),    # slot 1
     (80, 5, 160, 113),  # slot 2
-    (160, 5, 240, 113),  # slot 3
-    (40, 119, 120, 227),  # slot 4
-    (125, 119, 205, 227), # slot 5
+    (162, 5, 240, 113),  # slot 3
+    (35, 119, 115, 227),  # slot 4
+    (120, 119, 200, 227), # slot 5
 ]
 
 CANVAS_W = 2200
