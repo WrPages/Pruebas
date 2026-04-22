@@ -633,10 +633,10 @@ async def on_message(message: discord.Message):
         logger.info("gp_attachment seleccionado: %s", gp_attachment.filename)
         logger.info("source_img size: %s", source_img.size)
 
-       PROCESSED_MESSAGES.add(message.id)
+        PROCESSED_MESSAGES.add(message.id)
 
-if len(PROCESSED_MESSAGES) > 1000:
-    PROCESSED_MESSAGES.clear()
+        if len(PROCESSED_MESSAGES) > 1000:
+            PROCESSED_MESSAGES.clear()
 
         result = await asyncio.to_thread(process_gp_image, source_img, message.id)
 
