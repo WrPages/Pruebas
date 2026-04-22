@@ -24,7 +24,9 @@ TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "0"))
 # =========================================================
 
 BASE_DIR = Path(__file__).resolve().parent
-DETECT_DIR = BASE_DIR / "cards_detect"
+ONE_STAR_DIR = BASE_DIR / "one_star_detect"
+TWO_STAR_DIR = BASE_DIR / "two_star_detect"
+INVALID_DIR = BASE_DIR / "invalid_detect"
 HD_DIR = BASE_DIR / "cards_hd"
 OUTPUT_DIR = BASE_DIR / "output"
 
@@ -91,8 +93,9 @@ SAVE_DEBUG_SLOTS = False
 # =========================================================
 
 class TemplateCard:
-    def __init__(self, name: str, detect_path: Path, hd_path: Path):
+    def __init__(self, name: str, rarity: str, detect_path: Path, hd_path: Path):
         self.name = name
+        self.rarity = rarity
         self.detect_path = detect_path
         self.hd_path = hd_path
 
@@ -136,25 +139,19 @@ class TemplateCard:
 def load_templates() -> List[TemplateCard]:
     templates: List[TemplateCard] = []
 
-    logger.info("BASE_DIR: %s", BASE_DIR)
-    print(f"[INFO] DETECT_DIR existe: {DETECT_DIR.exists()} -> {DETECT_DIR}")
-    print(f"[INFO] HD_DIR existe: {HD_DIR.exists()} -> {HD_DIR}")
+    detect_groups = [
+        ("1★", ONE_STAR_DIR),
+        ("2★", TWO_STAR_DIR),
+        ("INVALID", INVALID_DIR),
+    ]
 
-    if not DETECT_DIR.exists():
-        raise RuntimeError(f"No existe la carpeta cards_detect: {DETECT_DIR}")
+    logger.info("BASE_DIR: %s", BASE_DIR)
+    logger.info("HD_DIR existe: %s -> %s", HD_DIR.exists(), HD_DIR)
 
     if not HD_DIR.exists():
         raise RuntimeError(f"No existe la carpeta cards_hd: {HD_DIR}")
 
     valid_suffixes = {".png", ".jpg", ".jpeg", ".webp"}
-
-    detect_files = sorted(
-        [
-            p for p in DETECT_DIR.iterdir()
-            if p.is_file() and p.suffix.lower() in valid_suffixes
-        ],
-        key=lambda p: p.name.lower()
-    )
 
     hd_files = sorted(
         [
@@ -164,56 +161,57 @@ def load_templates() -> List[TemplateCard]:
         key=lambda p: p.name.lower()
     )
 
-    print("[INFO] Archivos en cards_detect:")
-    if not detect_files:
-        print("  - (vacío)")
-    for f in detect_files:
-        try:
-            print(f"  - {f.name} ({f.stat().st_size} bytes)")
-        except Exception:
-            print(f"  - {f.name} (sin info de tamaño)")
+    for rarity, detect_dir in detect_groups:
+        logger.info("Leyendo templates %s desde %s", rarity, detect_dir)
 
-    print("[INFO] Archivos en cards_hd:")
-    if not hd_files:
-        print("  - (vacío)")
-    for f in hd_files:
-        try:
-            print(f"  - {f.name} ({f.stat().st_size} bytes)")
-        except Exception:
-            print(f"  - {f.name} (sin info de tamaño)")
-
-    for detect_file in detect_files:
-        name = detect_file.stem
-
-        if detect_file.stat().st_size == 0:
-            print(f"[WARN] Archivo detect vacío, se omite: {detect_file.name}")
+        if not detect_dir.exists():
+            logger.warning("No existe carpeta de detección %s: %s", rarity, detect_dir)
             continue
 
-        possible_hd_files = [
-            p for p in hd_files
-            if p.stem.lower() == name.lower()
-        ]
+        detect_files = sorted(
+            [
+                p for p in detect_dir.iterdir()
+                if p.is_file() and p.suffix.lower() in valid_suffixes
+            ],
+            key=lambda p: p.name.lower()
+        )
 
-        if not possible_hd_files:
-            logger.warning("No existe versión HD para %s", name)
+        if not detect_files:
+            logger.warning("Carpeta vacía para %s: %s", rarity, detect_dir)
             continue
 
-        hd_file = possible_hd_files[0]
+        for detect_file in detect_files:
+            name = detect_file.stem
 
-        if hd_file.stat().st_size == 0:
-            print(f"[WARN] Archivo HD vacío, se omite: {hd_file.name}")
-            continue
+            if detect_file.stat().st_size == 0:
+                logger.warning("Archivo detect vacío, se omite: %s", detect_file.name)
+                continue
 
-        try:
-            templates.append(TemplateCard(name, detect_file, hd_file))
-            print(f"[OK] Template cargado: {name}")
-        except Exception as e:
-            print(f"[WARN] Error cargando template {name}: {e}")
+            possible_hd_files = [
+                p for p in hd_files
+                if p.stem.lower() == name.lower()
+            ]
 
-    print(f"[INFO] Total templates válidos: {len(templates)}")
+            if not possible_hd_files:
+                logger.warning("No existe versión HD para %s", name)
+                continue
+
+            hd_file = possible_hd_files[0]
+
+            if hd_file.stat().st_size == 0:
+                logger.warning("Archivo HD vacío, se omite: %s", hd_file.name)
+                continue
+
+            try:
+                templates.append(TemplateCard(name, rarity, detect_file, hd_file))
+                logger.info("Template cargado: %s | rareza=%s", name, rarity)
+            except Exception as e:
+                logger.warning("Error cargando template %s (%s): %s", name, rarity, e)
+
+    logger.info("Total templates válidos: %s", len(templates))
 
     if not templates:
-        raise RuntimeError("No se cargó ningún template válido en cards_detect/ y cards_hd/")
+        raise RuntimeError("No se cargó ningún template válido en las carpetas de detección")
 
     return templates
 
@@ -328,7 +326,10 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
         return None, []
 
     best_t, best_score = ranking[0]
-    top_debug = [(x[0].name, round(x[1], 3)) for x in ranking[:5]]
+    top_debug = [
+    (f"{x[0].name} [{x[0].rarity}]", round(x[1], 3))
+    for x in ranking[:5]
+]
 
     if len(ranking) > 1:
         second_score = ranking[1][1]
@@ -399,7 +400,7 @@ def create_debug_contact_sheet(
         sheet.paste(thumb, (x, y))
         draw.text((x, 60), f"Slot {i + 1}", fill=(255, 255, 255))
 
-        label = detected_cards[i].name if detected_cards[i] else "No detectada"
+        label = f"{detected_cards[i].name} [{detected_cards[i].rarity}]" if detected_cards[i] else "No detectada"
         draw.text((x, 350), label[:24], fill=(180, 220, 255))
 
     return sheet
@@ -532,15 +533,21 @@ def process_gp_image(source_img: Image.Image, message_id: int) -> dict:
         detected_cards.append(card)
 
         if card:
-            debug_lines.append(f"Slot {idx + 1}: {card.name}")
+            debug_lines.append(f"Slot {idx + 1}: {card.name} | rareza={card.rarity}")
         else:
             debug_lines.append(f"Slot {idx + 1}: no detectada")
 
         if ranking:
-            debug_lines.append(f"Top {idx + 1}: {ranking[:3]}")
+            top_text = [f"{name} ({score})" for name, score in ranking[:3]]
+            debug_lines.append(f"Top {idx + 1}: {top_text}")
 
     found_count = sum(1 for c in detected_cards if c is not None)
     logger.info("Detectadas: %s/5", found_count)
+
+    rarity_count = {"1★": 0, "2★": 0, "INVALID": 0}
+    for card in detected_cards:
+        if card is not None:
+            rarity_count[card.rarity] = rarity_count.get(card.rarity, 0) + 1
 
     debug_sheet = create_debug_contact_sheet(source_img, slots, detected_cards)
     out_debug = OUTPUT_DIR / f"gp_debug_{message_id}.png"
@@ -568,6 +575,7 @@ def process_gp_image(source_img: Image.Image, message_id: int) -> dict:
 
     reply_text = "Reconstrucción HD del GP\n\n"
     reply_text += f"Detectadas: {found_count}/5\n"
+    reply_text += f"1★: {rarity_count.get('1★', 0)} | 2★: {rarity_count.get('2★', 0)} | INVALID: {rarity_count.get('INVALID', 0)}\n"
     reply_text += "```" + "\n".join(debug_lines[:20])[:1800] + "```"
 
     result["reply_text"] = reply_text
