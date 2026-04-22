@@ -9,7 +9,7 @@ import re
 import cv2
 import numpy as np
 import discord
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 # =========================================================
 # VARIABLES DE ENTORNO DESDE RAILWAY
@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "")
 CLIENT_ID = int(os.environ.get("CLIENT_ID", "0"))
 TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "0"))
+FORUM_CHANNEL_ID = int(os.environ.get("FORUM_CHANNEL_ID", "0"))
 
 # =========================================================
 # RUTAS
@@ -327,9 +328,9 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
 
     best_t, best_score = ranking[0]
     top_debug = [
-    (f"{x[0].name} [{x[0].rarity}]", round(x[1], 3))
-    for x in ranking[:5]
-]
+        (f"{x[0].name} [{x[0].rarity}]", round(x[1], 3))
+        for x in ranking[:5]
+    ]
 
     if len(ranking) > 1:
         second_score = ranking[1][1]
@@ -503,9 +504,172 @@ def is_target_message(message: discord.Message) -> bool:
 
     return len(message.attachments) > 0
 
+def parse_heartbeat_metadata(content: str) -> dict:
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+
+    result = {
+        "obtainer_user": None,
+        "bot_name": None,
+        "game_id": None,
+        "packs_count": None,
+        "filename": None,
+        "raw_pack_line": None,
+    }
+
+    if lines:
+        m = re.match(r"^@(\S+)", lines[0])
+        if m:
+            result["obtainer_user"] = m.group(1)
+
+    for line in lines:
+        m = re.match(r"^(.+?)\s*\((\d+)\)$", line)
+        if m:
+            result["bot_name"] = m.group(1).strip()
+            result["game_id"] = m.group(2).strip()
+            continue
+
+        m = re.search(r"(\[\d/5\]\[(\d+)P\]\[MegaShine\])", line, re.IGNORECASE)
+        if m:
+            result["raw_pack_line"] = m.group(1)
+            result["packs_count"] = int(m.group(2))
+            continue
+
+        m = re.match(r"^File name:\s*(.+)$", line, re.IGNORECASE)
+        if m:
+            result["filename"] = m.group(1).strip()
+
+    return result
 
 
-def process_gp_image(source_img: Image.Image, message_id: int) -> dict:
+
+def build_pack_rarity_label(detected_cards: List[Optional["TemplateCard"]]) -> str:
+    one_star = 0
+    two_star = 0
+    invalid = 0
+
+    for card in detected_cards:
+        if card is None:
+            continue
+        if card.rarity == "1★":
+            one_star += 1
+        elif card.rarity == "2★":
+            two_star += 1
+        else:
+            invalid += 1
+
+    if invalid > 0:
+        return f"[INVALID:{invalid}/5]"
+
+    return f"[{two_star}/5]"
+
+def get_font(size: int):
+    try:
+        return ImageFont.truetype("DejaVuSans.ttf", size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def build_final_poster(
+    hd_canvas: Image.Image,
+    pack_label: str,
+    packs_count: Optional[int],
+    bot_name: Optional[str],
+) -> Image.Image:
+    footer_h = 110
+    final_img = Image.new("RGBA", (hd_canvas.width, hd_canvas.height + footer_h), (20, 20, 20, 255))
+    final_img.alpha_composite(hd_canvas, (0, 0))
+
+    draw = ImageDraw.Draw(final_img)
+    font = get_font(34)
+
+    packs_text = f"[{packs_count}P]" if packs_count is not None else "[?P]"
+    bot_text = bot_name or "UnknownBot"
+    footer_text = f"{pack_label}   {packs_text}   {bot_text}"
+
+    bbox = draw.textbbox((0, 0), footer_text, font=font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+
+    x = (final_img.width - text_w) // 2
+    y = hd_canvas.height + (footer_h - text_h) // 2
+
+    draw.text((x, y), footer_text, fill=(235, 235, 235), font=font)
+    return final_img
+
+def build_forum_post_text(meta: dict, pack_label: str) -> str:
+    obtainer = f"@{meta['obtainer_user']}" if meta.get("obtainer_user") else "@desconocido"
+    bot_name = meta.get("bot_name") or "UnknownBot"
+    game_id = meta.get("game_id") or "UnknownID"
+    packs_count = meta.get("packs_count")
+    packs_text = f"[{packs_count}P]" if packs_count is not None else "[?P]"
+    filename = meta.get("filename") or "unknown_file.xml"
+
+    lines = [
+        f"**Usuario que obtuvo el GP:** {obtainer}",
+        "",
+        f"**Bot:** {bot_name} ({game_id})",
+        f"**Pack:** {pack_label}{packs_text}[MegaShine]",
+        "",
+        f"**File name:** `{filename}`",
+    ]
+    return "\n".join(lines)
+
+
+def build_post_title(meta: dict, pack_label: str) -> str:
+    packs_count = meta.get("packs_count")
+    packs_text = f"[{packs_count}P]" if packs_count is not None else "[?P]"
+    bot_name = meta.get("bot_name") or "UnknownBot"
+    return f"{pack_label} {packs_text} {bot_name}"
+
+async def create_forum_post_with_image(
+    client: discord.Client,
+    title: str,
+    body_text: str,
+    image_path: Path,
+) -> Optional[str]:
+    if not FORUM_CHANNEL_ID:
+        logger.warning("FORUM_CHANNEL_ID no configurado")
+        return None
+
+    channel = client.get_channel(FORUM_CHANNEL_ID)
+    if channel is None:
+        try:
+            channel = await client.fetch_channel(FORUM_CHANNEL_ID)
+        except Exception as e:
+            logger.exception("No se pudo obtener el canal foro: %s", e)
+            return None
+
+    if not isinstance(channel, discord.ForumChannel):
+        logger.error("FORUM_CHANNEL_ID no corresponde a un ForumChannel")
+        return None
+
+    try:
+        file = discord.File(str(image_path), filename=image_path.name)
+
+        created = await channel.create_thread(
+            name=title,
+            content=body_text,
+            file=file,
+        )
+
+        thread = created.thread if hasattr(created, "thread") else created
+        return thread.jump_url
+
+    except Exception as e:
+        logger.exception("No se pudo crear el post del foro: %s", e)
+        return None
+
+class ForumLinkView(discord.ui.View):
+    def __init__(self, post_url: str):
+        super().__init__(timeout=None)
+        self.add_item(
+            discord.ui.Button(
+                label="Abrir post",
+                style=discord.ButtonStyle.link,
+                url=post_url
+            )
+        )
+def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: str) -> dict:
     logger.info("Procesando imagen para message_id=%s", message_id)
 
     debug_source = OUTPUT_DIR / f"debug_source_{message_id}.png"
@@ -544,47 +708,61 @@ def process_gp_image(source_img: Image.Image, message_id: int) -> dict:
     found_count = sum(1 for c in detected_cards if c is not None)
     logger.info("Detectadas: %s/5", found_count)
 
-    rarity_count = {"1★": 0, "2★": 0, "INVALID": 0}
-    for card in detected_cards:
-        if card is not None:
-            rarity_count[card.rarity] = rarity_count.get(card.rarity, 0) + 1
+    meta = parse_heartbeat_metadata(heartbeat_text)
+    pack_label = build_pack_rarity_label(detected_cards)
 
     debug_sheet = create_debug_contact_sheet(source_img, slots, detected_cards)
     out_debug = OUTPUT_DIR / f"gp_debug_{message_id}.png"
     debug_sheet.save(out_debug)
 
-    result = {
+    if found_count == 0:
+        return {
+            "found_count": found_count,
+            "overlay_path": overlay_path,
+            "debug_path": out_debug,
+            "reply_text": "No se detectó ninguna carta. Revisa overlay y debug.",
+            "files": [
+                discord.File(str(overlay_path), filename="box_overlay.png"),
+                discord.File(str(out_debug), filename="gp_debug.png"),
+            ],
+            "pack_label": pack_label,
+            "heartbeat_meta": meta,
+            "final_image_path": None,
+        }
+
+    hd_canvas = build_hd_canvas(detected_cards)
+    final_poster = build_final_poster(
+        hd_canvas=hd_canvas,
+        pack_label=pack_label,
+        packs_count=meta.get("packs_count"),
+        bot_name=meta.get("bot_name"),
+    )
+
+    out_hd = OUTPUT_DIR / f"gp_hd_{message_id}.png"
+    final_poster.save(out_hd)
+
+    reply_text = "Reconstrucción HD del GP\n\n"
+    reply_text += f"{pack_label} "
+    reply_text += f"[{meta.get('packs_count', '?')}P] "
+    reply_text += f"{meta.get('bot_name', 'UnknownBot')}\n"
+    reply_text += "```" + "\n".join(debug_lines[:20])[:1800] + "```"
+
+    return {
         "found_count": found_count,
         "overlay_path": overlay_path,
         "debug_path": out_debug,
-        "reply_text": "",
-        "files": []
-    }
-
-    if found_count == 0:
-        result["reply_text"] = "No se detectó ninguna carta. Revisa overlay y debug."
-        result["files"] = [
+        "reply_text": reply_text,
+        "files": [
+            discord.File(str(out_hd), filename="gp_hd.png"),
             discord.File(str(overlay_path), filename="box_overlay.png"),
             discord.File(str(out_debug), filename="gp_debug.png"),
-        ]
-        return result
+        ],
+        "pack_label": pack_label,
+        "heartbeat_meta": meta,
+        "final_image_path": out_hd,
+    }
 
-    hd_canvas = build_hd_canvas(detected_cards)
-    out_hd = OUTPUT_DIR / f"gp_hd_{message_id}.png"
-    hd_canvas.save(out_hd)
 
-    reply_text = "Reconstrucción HD del GP\n\n"
-    reply_text += f"Detectadas: {found_count}/5\n"
-    reply_text += f"1★: {rarity_count.get('1★', 0)} | 2★: {rarity_count.get('2★', 0)} | INVALID: {rarity_count.get('INVALID', 0)}\n"
-    reply_text += "```" + "\n".join(debug_lines[:20])[:1800] + "```"
-
-    result["reply_text"] = reply_text
-    result["files"] = [
-        discord.File(str(out_hd), filename="gp_hd.png"),
-        discord.File(str(overlay_path), filename="box_overlay.png"),
-        discord.File(str(out_debug), filename="gp_debug.png"),
-    ]
-    return result
 # =========================================================
 # BOT DISCORD
 # =========================================================
@@ -646,11 +824,26 @@ async def on_message(message: discord.Message):
         if len(PROCESSED_MESSAGES) > 1000:
             PROCESSED_MESSAGES.clear()
 
-        result = await asyncio.to_thread(process_gp_image, source_img, message.id)
+        result = await asyncio.to_thread(process_gp_image, source_img, message.id, message.content)
+
+        post_url = None
+        if result["final_image_path"] is not None:
+            post_title = build_post_title(result["heartbeat_meta"], result["pack_label"])
+            post_body = build_forum_post_text(result["heartbeat_meta"], result["pack_label"])
+
+            post_url = await create_forum_post_with_image(
+                client=client,
+                title=post_title,
+                body_text=post_body,
+                image_path=result["final_image_path"],
+            )
+
+        view = ForumLinkView(post_url) if post_url else None
 
         await message.reply(
             result["reply_text"],
             files=result["files"],
+            view=view,
             mention_author=False
         )
 
