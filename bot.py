@@ -1,7 +1,10 @@
 import os
 import io
+import asyncio
+import logging
 from pathlib import Path
 from typing import List, Optional, Tuple
+import re
 
 import cv2
 import numpy as np
@@ -26,6 +29,11 @@ HD_DIR = BASE_DIR / "cards_hd"
 OUTPUT_DIR = BASE_DIR / "output"
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+logger = logging.getLogger("gp_detector")
 
 # =========================================================
 # CONFIGURACIÓN GENERAL
@@ -33,6 +41,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 REFERENCE_W = 240
 REFERENCE_H = 227
+MIN_CONFIDENCE_RATIO = 1.08
 
 # NUEVAS CAJAS DE PRUEBA MÁS GRANDES Y CENTRADAS
 # Ajustables después viendo el overlay
@@ -65,13 +74,18 @@ DRAW_SLOTS = [
     (1110, 970),
 ]
 
-TRIGGER_TEXTS = [
-    "God Pack found",
-    "[1/5][P][MegaShine]",
+TRIGGER_PATTERNS = [
+    re.compile(r"god\s*pack", re.IGNORECASE),
+    re.compile(r"megashine", re.IGNORECASE),
+    re.compile(r"\[1/5\]\[p\]", re.IGNORECASE),
 ]
 
 VALID_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
-
+PROCESSED_MESSAGES = set()
+MAX_SCORE_ACCEPT = 1800
+MAX_SCORE_ACCEPT_WITH_GAP = 2500
+MIN_SCORE_GAP = 60
+SAVE_DEBUG_SLOTS = False
 # =========================================================
 # CLASE TEMPLATE
 # =========================================================
@@ -85,6 +99,9 @@ class TemplateCard:
         self.detect_bgr = self._load_detect_image(detect_path)
         self.detect_gray = cv2.cvtColor(self.detect_bgr, cv2.COLOR_BGR2GRAY)
         self.detect_hist = self._compute_hist(self.detect_bgr)
+
+        self.hd_rgba = Image.open(hd_path).convert("RGBA")
+        self.hd_resized = self.hd_rgba.resize((CARD_W, CARD_H), Image.LANCZOS)
 
     @staticmethod
     def _load_detect_image(path: Path) -> np.ndarray:
@@ -119,7 +136,7 @@ class TemplateCard:
 def load_templates() -> List[TemplateCard]:
     templates: List[TemplateCard] = []
 
-    print(f"[INFO] BASE_DIR: {BASE_DIR}")
+    logger.info("BASE_DIR: %s", BASE_DIR)
     print(f"[INFO] DETECT_DIR existe: {DETECT_DIR.exists()} -> {DETECT_DIR}")
     print(f"[INFO] HD_DIR existe: {HD_DIR.exists()} -> {HD_DIR}")
 
@@ -178,7 +195,7 @@ def load_templates() -> List[TemplateCard]:
         ]
 
         if not possible_hd_files:
-            print(f"[WARN] No existe versión HD para {name}")
+            logger.warning("No existe versión HD para %s", name)
             continue
 
         hd_file = possible_hd_files[0]
@@ -204,7 +221,7 @@ def load_templates() -> List[TemplateCard]:
 try:
     TEMPLATES = load_templates()
 except Exception as e:
-    print(f"[ERROR] No se pudieron cargar templates: {e}")
+    logger.exception("No se pudieron cargar templates: %s", e)
     TEMPLATES = []
 
 # =========================================================
@@ -258,7 +275,12 @@ def compute_hist(img_bgr: np.ndarray) -> np.ndarray:
     )
     hist = cv2.normalize(hist, hist).flatten()
     return hist
-
+    
+def preprocess_slot(slot_bgr: np.ndarray) -> np.ndarray:
+    blurred = cv2.GaussianBlur(slot_bgr, (3, 3), 0)
+    yuv = cv2.cvtColor(blurred, cv2.COLOR_BGR2YUV)
+    yuv[:, :, 0] = cv2.equalizeHist(yuv[:, :, 0])
+    return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR)
 
 def compare_images(slot_bgr: np.ndarray, template: TemplateCard) -> float:
     resized = cv2.resize(
@@ -266,10 +288,14 @@ def compare_images(slot_bgr: np.ndarray, template: TemplateCard) -> float:
         (template.detect_bgr.shape[1], template.detect_bgr.shape[0]),
         interpolation=cv2.INTER_AREA
     )
+    resized = preprocess_slot(resized)
 
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
 
-    diff = gray.astype(np.float32) - template.detect_gray.astype(np.float32)
+    gray = cv2.equalizeHist(gray)
+    tpl_gray = cv2.equalizeHist(template.detect_gray)
+
+    diff = gray.astype(np.float32) - tpl_gray.astype(np.float32)
     mse = float(np.mean(diff ** 2))
 
     hist_slot = compute_hist(resized)
@@ -280,11 +306,9 @@ def compare_images(slot_bgr: np.ndarray, template: TemplateCard) -> float:
     )
     hist_penalty = (1.0 - max(-1.0, min(1.0, hist_corr))) * 1000.0
 
-    res = cv2.matchTemplate(gray, template.detect_gray, cv2.TM_CCOEFF_NORMED)
-    match_score = float(res[0][0])
-    match_penalty = (1.0 - match_score) * 1000.0
+    l2_distance = cv2.norm(gray, tpl_gray, cv2.NORM_L2) / gray.size
 
-    total_score = (mse * 0.60) + (hist_penalty * 0.20) + (match_penalty * 0.20)
+    total_score = (mse * 0.50) + (hist_penalty * 0.20) + (l2_distance * 1000.0 * 0.30)
     return total_score
 
 
@@ -295,7 +319,8 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
         try:
             score = compare_images(slot_bgr, t)
             ranking.append((t, score))
-        except Exception:
+        except Exception as e:
+            logger.warning("Error comparando con %s: %s", t.name, e)
             continue
 
     ranking.sort(key=lambda x: x[1])
@@ -309,14 +334,16 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
     if len(ranking) > 1:
         second_score = ranking[1][1]
         gap = second_score - best_score
+        ratio = second_score / max(best_score, 1e-6)
     else:
         gap = 999999.0
+        ratio = 999999.0
 
-    if best_score < 2500 and gap > 60:
-        return best_t, top_debug
+  if best_score < MAX_SCORE_ACCEPT:
+    return best_t, top_debug
 
-    if best_score < 1800:
-        return best_t, top_debug
+if best_score < MAX_SCORE_ACCEPT_WITH_GAP and gap > MIN_SCORE_GAP and ratio > MIN_CONFIDENCE_RATIO:
+    return best_t, top_debug
 
     return None, top_debug
 
@@ -341,11 +368,8 @@ def build_hd_canvas(detected_cards: List[Optional[TemplateCard]]) -> Image.Image
         if card is None:
             continue
 
-        hd = Image.open(card.hd_path).convert("RGBA")
-        hd = hd.resize((CARD_W, CARD_H), Image.LANCZOS)
-
         x, y = DRAW_SLOTS[i]
-        canvas.alpha_composite(hd, (x, y))
+        canvas.alpha_composite(card.hd_resized, (x, y))
 
     return canvas
 
@@ -412,8 +436,7 @@ async def download_pil_image(attachment: discord.Attachment) -> Image.Image:
     data = await attachment.read()
     return Image.open(io.BytesIO(data)).convert("RGBA")
 
-
-async def get_best_gp_image_attachment(message: discord.Message) -> Optional[discord.Attachment]:
+async def get_best_gp_image_attachment(message: discord.Message) -> Optional[Tuple[discord.Attachment, Image.Image]]:
     image_attachments = [att for att in message.attachments if attachment_looks_like_gp_grid(att)]
 
     if not image_attachments:
@@ -421,14 +444,19 @@ async def get_best_gp_image_attachment(message: discord.Message) -> Optional[dis
 
     preferred_keywords = ["screenshot", "screen", "pack", "packs", "godpack", "gp"]
 
+    best_att = None
+    best_img = None
+    best_score = None
+
     for att in image_attachments:
         name = att.filename.lower()
         if any(k in name for k in preferred_keywords):
-            print(f"[DEBUG] Attachment elegido por nombre: {att.filename}")
-            return att
-
-    best_att = None
-    best_score = None
+            try:
+                img = await download_pil_image(att)
+                logger.info("Attachment elegido por nombre: %s", att.filename)
+                return att, img
+            except Exception as e:
+                logger.warning("Error cargando attachment %s: %s", att.filename, e)
 
     for att in image_attachments:
         try:
@@ -442,18 +470,22 @@ async def get_best_gp_image_attachment(message: discord.Message) -> Optional[dis
 
             score = abs(w - 240) + abs(h - 227) + abs(aspect - (240 / 227)) * 100 + penalty
 
-            print(f"[DEBUG] Attachment candidato: {att.filename} size={w}x{h} score={score}")
+            logger.info("Attachment candidato: %s size=%sx%s score=%s", att.filename, w, h, score)
 
             if best_score is None or score < best_score:
                 best_score = score
                 best_att = att
+                best_img = img
+
         except Exception as e:
-            print(f"[WARN] Error analizando attachment {att.filename}: {e}")
+            logger.warning("Error analizando attachment %s: %s", att.filename, e)
 
-    if best_att:
-        print(f"[DEBUG] Attachment elegido por tamaño: {best_att.filename}")
+    if best_att is not None and best_img is not None:
+        logger.info("Attachment elegido por tamaño: %s", best_att.filename)
+        return best_att, best_img
 
-    return best_att if best_att else image_attachments[0]
+    return None
+
 
 
 def is_target_message(message: discord.Message) -> bool:
@@ -464,10 +496,87 @@ def is_target_message(message: discord.Message) -> bool:
         return False
 
     content = message.content or ""
-    content_lower = content.lower()
 
-    return any(trigger.lower() in content_lower for trigger in TRIGGER_TEXTS)
+    if any(pattern.search(content) for pattern in TRIGGER_PATTERNS):
+        return True
 
+    return len(message.attachments) > 0
+
+
+
+def process_gp_image(source_img: Image.Image, message_id: int) -> dict:
+    logger.info("Procesando imagen para message_id=%s", message_id)
+
+    debug_source = OUTPUT_DIR / f"debug_source_{message_id}.png"
+    source_img.save(debug_source)
+
+    box_overlay = create_box_overlay(source_img)
+    overlay_path = OUTPUT_DIR / f"box_overlay_{message_id}.png"
+    box_overlay.save(overlay_path)
+
+    slots = extract_slots(source_img)
+
+    if SAVE_DEBUG_SLOTS:
+        for i, slot in enumerate(slots):
+            slot_path = OUTPUT_DIR / f"debug_slot_{message_id}_{i+1}.png"
+            cv_to_pil(slot).save(slot_path)
+            logger.debug("Guardado slot %s: %s", i + 1, slot_path)
+
+    detected_cards: List[Optional[TemplateCard]] = []
+    debug_lines: List[str] = []
+
+    for idx, slot in enumerate(slots):
+        card, ranking = detect_card(slot, TEMPLATES)
+        logger.info("Slot %s ranking: %s", idx + 1, ranking[:5])
+
+        detected_cards.append(card)
+
+        if card:
+            debug_lines.append(f"Slot {idx + 1}: {card.name}")
+        else:
+            debug_lines.append(f"Slot {idx + 1}: no detectada")
+
+        if ranking:
+            debug_lines.append(f"Top {idx + 1}: {ranking[:3]}")
+
+    found_count = sum(1 for c in detected_cards if c is not None)
+    logger.info("Detectadas: %s/5", found_count)
+
+    debug_sheet = create_debug_contact_sheet(source_img, slots, detected_cards)
+    out_debug = OUTPUT_DIR / f"gp_debug_{message_id}.png"
+    debug_sheet.save(out_debug)
+
+    result = {
+        "found_count": found_count,
+        "overlay_path": overlay_path,
+        "debug_path": out_debug,
+        "reply_text": "",
+        "files": []
+    }
+
+    if found_count == 0:
+        result["reply_text"] = "No se detectó ninguna carta. Revisa overlay y debug."
+        result["files"] = [
+            discord.File(str(overlay_path), filename="box_overlay.png"),
+            discord.File(str(out_debug), filename="gp_debug.png"),
+        ]
+        return result
+
+    hd_canvas = build_hd_canvas(detected_cards)
+    out_hd = OUTPUT_DIR / f"gp_hd_{message_id}.png"
+    hd_canvas.save(out_hd)
+
+    reply_text = "Reconstrucción HD del GP\n\n"
+    reply_text += f"Detectadas: {found_count}/5\n"
+    reply_text += "```" + "\n".join(debug_lines[:20])[:1800] + "```"
+
+    result["reply_text"] = reply_text
+    result["files"] = [
+        discord.File(str(out_hd), filename="gp_hd.png"),
+        discord.File(str(overlay_path), filename="box_overlay.png"),
+        discord.File(str(out_debug), filename="gp_debug.png"),
+    ]
+    return result
 # =========================================================
 # BOT DISCORD
 # =========================================================
@@ -480,116 +589,67 @@ client = discord.Client(intents=intents)
 
 @client.event
 async def on_ready():
-    print(f"[INFO] Bot conectado como {client.user}")
+    logger.info("Bot conectado como %s", client.user)
 
 
 @client.event
 async def on_message(message: discord.Message):
     try:
-        print(
-            f"[DEBUG] on_message author={message.author} "
-            f"author_id={message.author.id} "
-            f"bot={message.author.bot} "
-            f"webhook_id={message.webhook_id} "
-            f"channel_id={message.channel.id} "
-            f"content={repr(message.content)} "
-            f"attachments={[a.filename for a in message.attachments]}"
+        logger.info(
+            "on_message author=%s author_id=%s bot=%s webhook_id=%s channel_id=%s content=%r attachments=%s",
+            message.author,
+            message.author.id,
+            message.author.bot,
+            message.webhook_id,
+            message.channel.id,
+            message.content,
+            [a.filename for a in message.attachments]
         )
 
         if message.author.id == client.user.id:
-            print("[DEBUG] Ignorado: mensaje del propio bot")
+            logger.info("Ignorado: mensaje del propio bot")
+            return
+
+        if message.id in PROCESSED_MESSAGES:
+            logger.info("Ignorado: mensaje ya procesado %s", message.id)
             return
 
         if not TEMPLATES:
-            print("[DEBUG] Ignorado: no hay templates cargados")
+            logger.info("Ignorado: no hay templates cargados")
             return
 
         if not is_target_message(message):
-            print("[DEBUG] Ignorado: no coincide con filtro webhook/canal/trigger")
+            logger.info("Ignorado: no coincide con filtro webhook/canal/trigger")
             return
 
-        print("[DEBUG] Mensaje webhook objetivo detectado, procesando...")
+        logger.info("Mensaje webhook objetivo detectado, procesando...")
 
-        gp_attachment = await get_best_gp_image_attachment(message)
-        if gp_attachment is None:
-            print("[DEBUG] No se encontró imagen válida en attachments")
+        gp_result = await get_best_gp_image_attachment(message)
+        if gp_result is None:
+            logger.info("No se encontró imagen válida en attachments")
             return
 
-        print(f"[DEBUG] gp_attachment seleccionado: {gp_attachment.filename}")
+        gp_attachment, source_img = gp_result
+        logger.info("gp_attachment seleccionado: %s", gp_attachment.filename)
+        logger.info("source_img size: %s", source_img.size)
 
-        source_img = await download_pil_image(gp_attachment)
-        print(f"[DEBUG] source_img size: {source_img.size}")
+       PROCESSED_MESSAGES.add(message.id)
 
-        debug_source = OUTPUT_DIR / f"debug_source_{message.id}.png"
-        source_img.save(debug_source)
+if len(PROCESSED_MESSAGES) > 1000:
+    PROCESSED_MESSAGES.clear()
 
-        box_overlay = create_box_overlay(source_img)
-        overlay_path = OUTPUT_DIR / f"box_overlay_{message.id}.png"
-        box_overlay.save(overlay_path)
+        result = await asyncio.to_thread(process_gp_image, source_img, message.id)
 
-        slots = extract_slots(source_img)
+        await message.reply(
+            result["reply_text"],
+            files=result["files"],
+            mention_author=False
+        )
 
-        for i, slot in enumerate(slots):
-            slot_path = OUTPUT_DIR / f"debug_slot_{message.id}_{i+1}.png"
-            cv_to_pil(slot).save(slot_path)
-            print(f"[DEBUG] Guardado slot {i+1}: {slot_path}")
-
-        detected_cards: List[Optional[TemplateCard]] = []
-        debug_lines: List[str] = []
-
-        for idx, slot in enumerate(slots):
-            card, ranking = detect_card(slot, TEMPLATES)
-            print(f"[DEBUG] Slot {idx+1} ranking: {ranking[:5]}")
-
-            detected_cards.append(card)
-
-            if card:
-                debug_lines.append(f"Slot {idx + 1}: {card.name}")
-            else:
-                debug_lines.append(f"Slot {idx + 1}: no detectada")
-
-            if ranking:
-                debug_lines.append(f"Top {idx + 1}: {ranking[:3]}")
-
-        found_count = sum(1 for c in detected_cards if c is not None)
-        print(f"[DEBUG] Detectadas: {found_count}/5")
-
-        debug_sheet = create_debug_contact_sheet(source_img, slots, detected_cards)
-        out_debug = OUTPUT_DIR / f"gp_debug_{message.id}.png"
-        debug_sheet.save(out_debug)
-
-        if found_count == 0:
-            print("[INFO] No se detectó ninguna carta.")
-
-            await message.reply(
-                "No se detectó ninguna carta. Revisa overlay y debug.",
-                files=[
-                    discord.File(str(overlay_path), filename="box_overlay.png"),
-                    discord.File(str(out_debug), filename="gp_debug.png"),
-                ],
-                mention_author=False
-            )
-            return
-
-        hd_canvas = build_hd_canvas(detected_cards)
-        out_hd = OUTPUT_DIR / f"gp_hd_{message.id}.png"
-        hd_canvas.save(out_hd)
-
-        reply_text = "Reconstrucción HD del GP\n\n"
-        reply_text += f"Detectadas: {found_count}/5\n"
-        reply_text += "```" + "\n".join(debug_lines[:20])[:1800] + "```"
-
-        files = [
-            discord.File(str(out_hd), filename="gp_hd.png"),
-            discord.File(str(overlay_path), filename="box_overlay.png"),
-            discord.File(str(out_debug), filename="gp_debug.png"),
-        ]
-
-        await message.reply(reply_text, files=files, mention_author=False)
-        print(f"[INFO] Procesado mensaje {message.id} - detectadas {found_count}/5")
+        logger.info("Procesado mensaje %s - detectadas %s/5", message.id, result["found_count"])
 
     except Exception as e:
-        print(f"[ERROR] on_message: {e}")
+        logger.exception("on_message: %s", e)
 
 # =========================================================
 # MAIN
