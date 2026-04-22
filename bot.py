@@ -321,7 +321,6 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
             ranking.append((t, score))
         except Exception as e:
             logger.warning("Error comparando con %s: %s", t.name, e)
-            continue
 
     ranking.sort(key=lambda x: x[1])
 
@@ -329,7 +328,7 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
         return None, []
 
     best_t, best_score = ranking[0]
-    top_debug = [(x[0].name, round(x[1], 3)) for x in ranking[:5]]
+    top_debug = [(x[0].name, round(x[1], 3)) for x in ranking[:7]]
 
     if len(ranking) > 1:
         second_score = ranking[1][1]
@@ -339,10 +338,14 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
         gap = 999999.0
         ratio = 999999.0
 
-     if best_score < MAX_SCORE_ACCEPT:
+    if best_score < MAX_SCORE_ACCEPT:
         return best_t, top_debug
 
-    if best_score < MAX_SCORE_ACCEPT_WITH_GAP and gap > MIN_SCORE_GAP and ratio > MIN_CONFIDENCE_RATIO:
+    if (
+        best_score < MAX_SCORE_ACCEPT_WITH_GAP
+        and gap > MIN_SCORE_GAP
+        and ratio > MIN_CONFIDENCE_RATIO
+    ):
         return best_t, top_debug
 
     return None, top_debug
