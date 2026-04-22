@@ -339,13 +339,14 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
         gap = 999999.0
         ratio = 999999.0
 
-  if best_score < MAX_SCORE_ACCEPT:
-    return best_t, top_debug
+     if best_score < MAX_SCORE_ACCEPT:
+        return best_t, top_debug
 
-if best_score < MAX_SCORE_ACCEPT_WITH_GAP and gap > MIN_SCORE_GAP and ratio > MIN_CONFIDENCE_RATIO:
-    return best_t, top_debug
+    if best_score < MAX_SCORE_ACCEPT_WITH_GAP and gap > MIN_SCORE_GAP and ratio > MIN_CONFIDENCE_RATIO:
+        return best_t, top_debug
 
     return None, top_debug
+
 
 
 def extract_slots(source_img: Image.Image) -> List[np.ndarray]:
