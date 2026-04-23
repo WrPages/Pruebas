@@ -909,11 +909,17 @@ async def on_message(message: discord.Message):
                 discord.File(str(result["final_image_path"]), filename="gp_hd.png")
             )
 
-        await message.reply(
-            files=original_files,
-            view=view,
-            mention_author=False
-        )
+        if original_files or view is not None:
+            await message.reply(
+                files=original_files,
+                view=view,
+                mention_author=False
+            )
+        else:
+            await message.reply(
+                "No se pudo generar la imagen HD.",
+                mention_author=False
+            )
 
         # =========================
         # 2. ENVÍO COMPLETO A CANAL DE REGISTRO
@@ -949,6 +955,8 @@ async def on_message(message: discord.Message):
                 )
 
                 asyncio.create_task(delete_message_later(sent_log, 172800))
+    except Exception as e:
+        logger.exception("on_message: %s", e)
 
 # =========================================================
 # MAIN
