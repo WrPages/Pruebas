@@ -21,14 +21,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "")
 CLIENT_ID = int(os.environ.get("CLIENT_ID", "0"))
-TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "0"))
 FORUM_CHANNEL_ID = int(os.environ.get("FORUM_CHANNEL_ID", "0"))
 LOG_CHANNEL_ID = int(os.environ.get("LOG_CHANNEL_ID", "0"))
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 USERS_GP_GIST_ID = os.environ.get("USERS_GP_GIST_ID", "")
 USERS_GP_FILE = os.environ.get("USERS_GP_FILE", "gp_user.json")
-GP_VOTE_GIST_ID = os.environ.get("GP_VOTE_GIST_ID", "")
-GP_VOTE_FILE = os.environ.get("GP_VOTE_FILE", "gp_votes.json")
 
 # =========================================================
 # RUTAS
@@ -120,6 +117,8 @@ GROUP_CONFIG = {
         "vip_filename": "trainer_vip.txt",
         "live_gist_id": "4f35f34b50e142fd4c89ff7bb8e30190",
         "live_filename": "trainer_gp_live_stats.json",
+        "vote_gist_id": "7a91d04879b3b652b6a9a177e44f98c8",
+        "vote_file": "trainer_gp_votes.json",
     },
     "Gym_Leader": {
         "users_gist_id": "a3f5f3d8a2e6ddf2378fb3481dff49f6",
@@ -130,6 +129,8 @@ GROUP_CONFIG = {
         "vip_filename": "gym_vip.txt",
         "live_gist_id": "931b1284bc6abffc6681f733ac4361ff",
         "live_filename": "gym_gp_live_stats.json",
+        "vote_gist_id": "03b9697ea313c6e444a0d94d6929c999",
+        "vote_file": "gym_gp_votes.json",
     },
     "Elite_Four": {
         "users_gist_id": "bb18eda2ea748723d8fe0131dd740b70",
@@ -140,6 +141,8 @@ GROUP_CONFIG = {
         "vip_filename": "elite_vip.txt",
         "live_gist_id": "4773653072f4851e91958a333e503de9",
         "live_filename": "gp_live_stats.json",
+        "vote_gist_id": "20769d5b776e8aa238094befb4baefeb",
+        "vote_file": "elite_gp_votes.json",
     },
 }
 
@@ -660,7 +663,7 @@ def is_target_message(message: discord.Message) -> bool:
     if message.webhook_id is None:
         return False
 
-    if TARGET_CHANNEL_ID and message.channel.id != TARGET_CHANNEL_ID:
+    if message.channel.id not in CHANNEL_GROUP_MAP:
         return False
 
     content = message.content or ""
@@ -1186,12 +1189,28 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
 # VOTOS GP
 # =========================================================
 
-async def load_vote_state() -> dict:
-    return await gist_load_json(GP_VOTE_GIST_ID, GP_VOTE_FILE, {})
+async def load_vote_state(group: str) -> dict:
+    config = GROUP_CONFIG.get(group)
+    if not config:
+        return {}
+
+    return await gist_load_json(
+        config["vote_gist_id"],
+        config["vote_file"],
+        {}
+    )
 
 
-async def save_vote_state(data: dict) -> None:
-    await gist_save_json(GP_VOTE_GIST_ID, GP_VOTE_FILE, data)
+async def save_vote_state(group: str, data: dict) -> None:
+    config = GROUP_CONFIG.get(group)
+    if not config:
+        return
+
+    await gist_save_json(
+        config["vote_gist_id"],
+        config["vote_file"],
+        data
+    )
 
 
 class GPVoteView(discord.ui.View):
@@ -1209,7 +1228,7 @@ class GPVoteView(discord.ui.View):
         await self.handle_vote(interaction, "dead")
 
     async def handle_vote(self, interaction: discord.Interaction, vote_type: str):
-        data = await load_vote_state()
+        data = await load_vote_state(self.group)
         state = data.get(self.vote_key)
 
         if not state:
@@ -1243,7 +1262,7 @@ class GPVoteView(discord.ui.View):
             state["counted_alive"] = True
 
         data[self.vote_key] = state
-        await save_vote_state(data)
+        await save_vote_state(self.group, data)
 
         for child in self.children:
             if child.custom_id == "gp_alive":
@@ -1371,7 +1390,7 @@ async def on_message(message: discord.Message):
                     )
 
                 vote_key = str(post_thread.id)
-                vote_data = await load_vote_state()
+                vote_data = await load_vote_state(group)
 
                 if vote_key not in vote_data:
                     vote_data[vote_key] = {
@@ -1384,7 +1403,7 @@ async def on_message(message: discord.Message):
                         "counted_alive": False,
                     }
 
-                await save_vote_state(vote_data)
+                await save_vote_state(group, vote_data)
 
                 vote_view = GPVoteView(vote_key=vote_key, group=group)
                 await post_thread.send("Estado del GP:", view=vote_view)
