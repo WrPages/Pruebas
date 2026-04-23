@@ -653,11 +653,17 @@ async def create_forum_post_with_image(
         return None
 
 class ForumLinkView(discord.ui.View):
-    def __init__(self, post_url: str):
+    def __init__(self, post_url: str, meta: dict, pack_label: str):
         super().__init__(timeout=None)
+
+        packs = meta.get("packs_count", "?")
+        bot = meta.get("bot_name", "Bot")
+
+        label = f"{pack_label} [{packs}P] {bot}"
+
         self.add_item(
             discord.ui.Button(
-                label="Abrir post",
+                label=label[:80],  # límite Discord
                 style=discord.ButtonStyle.link,
                 url=post_url
             )
@@ -723,10 +729,10 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
             "final_image_path": None,
         }
 
-hd_canvas = build_hd_canvas(detected_cards)
+    hd_canvas = build_hd_canvas(detected_cards)
 
-out_hd = OUTPUT_DIR / f"gp_hd_{message_id}.png"
-hd_canvas.save(out_hd)
+    out_hd = OUTPUT_DIR / f"gp_hd_{message_id}.png"
+    hd_canvas.save(out_hd)
 
     reply_text = "Reconstrucción HD del GP\n\n"
     reply_text += f"{pack_label} "
@@ -825,7 +831,11 @@ async def on_message(message: discord.Message):
                 image_path=result["final_image_path"],
             )
 
-        view = ForumLinkView(post_url) if post_url else None
+        view = ForumLinkView(
+    post_url,
+    result["heartbeat_meta"],
+    result["pack_label"]
+)
 
         await message.reply(
             result["reply_text"],
