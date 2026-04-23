@@ -522,6 +522,17 @@ async def download_attachment_to_file(att: discord.Attachment, save_path: Path) 
         logger.warning("No se pudo guardar attachment %s: %s", att.filename, e)
         return None
 
+async def collect_message_attachments(message: discord.Message) -> List[discord.File]:
+    files: List[discord.File] = []
+
+    for idx, att in enumerate(message.attachments, start=1):
+        saved_path = OUTPUT_DIR / f"log_original_{message.id}_{idx}_{att.filename}"
+        saved = await download_attachment_to_file(att, saved_path)
+        if saved:
+            files.append(discord.File(str(saved), filename=saved.name))
+
+    return files
+
 def is_target_message(message: discord.Message) -> bool:
     if message.webhook_id is None:
         return False
@@ -937,16 +948,20 @@ async def on_message(message: discord.Message):
                     log_channel = None
 
             if log_channel is not None:
-                forwarded_msg = None
-                try:
-                    forwarded_msg = await message.forward(log_channel)
-                except Exception as e:
-                    logger.warning("No se pudo reenviar el mensaje original: %s", e)
-
                 log_summary = build_log_summary(
                     result["heartbeat_meta"],
                     result["pack_label"],
                     result.get("debug_lines", [])
+                )
+
+                original_files = await collect_message_attachments(message)
+
+                # mensaje original copiado manualmente
+                original_text = message.content or "(sin texto)"
+
+                sent_original = await log_channel.send(
+                    content=f"**Mensaje original:**\n```{original_text[:1800]}```",
+                    files=original_files if original_files else None
                 )
 
                 log_files = [
@@ -959,8 +974,7 @@ async def on_message(message: discord.Message):
                     files=log_files
                 )
 
-                if forwarded_msg is not None:
-                    asyncio.create_task(delete_message_later(forwarded_msg, 172800))
+                asyncio.create_task(delete_message_later(sent_original, 172800))
                 asyncio.create_task(delete_message_later(sent_log, 172800))
 
         try:
