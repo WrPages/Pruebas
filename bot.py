@@ -516,17 +516,11 @@ def parse_heartbeat_metadata(content: str) -> dict:
         "raw_pack_line": None,
     }
 
-for line in lines:
-    m = re.match(r"^(.+?)\s*\((\d+)\)$", line)
-    if m:
-        result["obtainer_user"] = m.group(1).strip()  # 👈 ESTE ES EL BUENO
-        result["bot_name"] = m.group(1).strip()
-        result["game_id"] = m.group(2).strip()
-        break
-
     for line in lines:
+        # 👇 ESTE ES EL USUARIO REAL
         m = re.match(r"^(.+?)\s*\((\d+)\)$", line)
         if m:
+            result["obtainer_user"] = m.group(1).strip()
             result["bot_name"] = m.group(1).strip()
             result["game_id"] = m.group(2).strip()
             continue
