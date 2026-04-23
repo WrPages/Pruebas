@@ -366,11 +366,34 @@ def extract_slots(source_img: Image.Image) -> List[np.ndarray]:
 def build_hd_canvas(detected_cards: List[Optional[TemplateCard]]) -> Image.Image:
     canvas = Image.new("RGBA", (CANVAS_W, CANVAS_H), (20, 20, 20, 255))
 
+    # ===== GRID CONFIG =====
+    cols = 3
+    rows = 2
+    gap_x = 40
+    gap_y = 60
+
+    # calcular tamaño total del grid
+    total_w = cols * CARD_W + (cols - 1) * gap_x
+    total_h = rows * CARD_H + (rows - 1) * gap_y
+
+    # 👇 CENTRADO AUTOMÁTICO
+    start_x = (CANVAS_W - total_w) // 2
+    start_y = (CANVAS_H - total_h) // 2
+
+    positions = [
+        (0, 0), (1, 0), (2, 0),
+        (0.5, 1), (1.5, 1)  # fila de abajo centrada
+    ]
+
     for i, card in enumerate(detected_cards):
         if card is None:
             continue
 
-        x, y = DRAW_SLOTS[i]
+        col, row = positions[i]
+
+        x = int(start_x + col * (CARD_W + gap_x))
+        y = int(start_y + row * (CARD_H + gap_y))
+
         canvas.alpha_composite(card.hd_resized, (x, y))
 
     return canvas
