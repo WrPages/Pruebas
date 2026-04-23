@@ -604,13 +604,12 @@ def build_forum_post_text(meta: dict, pack_label: str) -> str:
     packs_text = f"[{packs_count}P]" if packs_count is not None else "[?P]"
     filename = meta.get("filename") or "unknown_file.xml"
 
-    lines = [
-        obtainer,
-        f"{bot_name} ({game_id})",
+    return "\n".join([
+        f"## {obtainer}",
         f"{pack_label}{packs_text}[MegaShine]",
+        f"{bot_name} ({game_id})",
         f"`{filename}`",
-    ]
-    return "\n".join(lines)
+    ])
 
 def build_post_title(meta: dict, pack_label: str) -> str:
     packs_count = meta.get("packs_count")
