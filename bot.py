@@ -364,7 +364,8 @@ def extract_slots(source_img: Image.Image) -> List[np.ndarray]:
 
 
 def build_hd_canvas(detected_cards: List[Optional[TemplateCard]]) -> Image.Image:
-    canvas = Image.new("RGBA", (CANVAS_W, CANVAS_H), (20, 20, 20, 255))
+    #canvas = Image.new("RGBA", (CANVAS_W, CANVAS_H), (20, 20, 20, 255))
+    canvas = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
 
     # ===== GRID CONFIG =====
     cols = 3
