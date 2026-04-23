@@ -605,15 +605,12 @@ def build_forum_post_text(meta: dict, pack_label: str) -> str:
     filename = meta.get("filename") or "unknown_file.xml"
 
     lines = [
-        f"**Usuario que obtuvo el GP:** {obtainer}",
-        "",
-        f"**Bot:** {bot_name} ({game_id})",
-        f"**Pack:** {pack_label}{packs_text}[MegaShine]",
-        "",
-        f"**File name:** `{filename}`",
+        obtainer,
+        f"{bot_name} ({game_id})",
+        f"{pack_label}{packs_text}[MegaShine]",
+        f"`{filename}`",
     ]
     return "\n".join(lines)
-
 
 def build_post_title(meta: dict, pack_label: str) -> str:
     packs_count = meta.get("packs_count")
