@@ -5,6 +5,10 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Tuple
 import re
+import json
+from collections import defaultdict
+import aiohttp
+from datetime import datetime, timedelta, timezone
 
 import cv2
 import numpy as np
@@ -20,6 +24,11 @@ CLIENT_ID = int(os.environ.get("CLIENT_ID", "0"))
 TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "0"))
 FORUM_CHANNEL_ID = int(os.environ.get("FORUM_CHANNEL_ID", "0"))
 LOG_CHANNEL_ID = int(os.environ.get("LOG_CHANNEL_ID", "0"))
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+USERS_GP_GIST_ID = os.environ.get("USERS_GP_GIST_ID", "")
+USERS_GP_FILE = os.environ.get("USERS_GP_FILE", "gp_user.json")
+GP_VOTE_GIST_ID = os.environ.get("GP_VOTE_GIST_ID", "")
+GP_VOTE_FILE = os.environ.get("GP_VOTE_FILE", "gp_votes.json")
 
 # =========================================================
 # RUTAS
@@ -90,6 +99,51 @@ MAX_SCORE_ACCEPT = 1800
 MAX_SCORE_ACCEPT_WITH_GAP = 2500
 MIN_SCORE_GAP = 60
 SAVE_DEBUG_SLOTS = False
+
+# =========================================================
+# CONFIG GISTS POR GRUPO
+# =========================================================
+
+CHANNEL_GROUP_MAP = {
+    1486277594629275770: "Elite_Four",
+    1487362022864588902: "Trainer",
+    1491238471556403281: "Gym_Leader",
+}
+
+GROUP_CONFIG = {
+    "Trainer": {
+        "users_gist_id": "1c066922bc39ac136b6f234fad6d9420",
+        "users_filename": "trainer_users.json",
+        "online_gist_id": "4edcf4d341cd4f7d5d0fb8a50f8b8c3c",
+        "online_filename": "trainer_ids.txt",
+        "vip_gist_id": "16541fd83785a49ad4a0f22bbeb06000",
+        "vip_filename": "trainer_vip.txt",
+        "live_gist_id": "4f35f34b50e142fd4c89ff7bb8e30190",
+        "live_filename": "trainer_gp_live_stats.json",
+    },
+    "Gym_Leader": {
+        "users_gist_id": "a3f5f3d8a2e6ddf2378fb3481dff49f6",
+        "users_filename": "gym_users.json",
+        "online_gist_id": "e110c37b3e0b8de83a33a1b0a5eb64e8",
+        "online_filename": "gym_ids.txt",
+        "vip_gist_id": "79a0e30c401cfd63e78d9ec5a9210091",
+        "vip_filename": "gym_vip.txt",
+        "live_gist_id": "931b1284bc6abffc6681f733ac4361ff",
+        "live_filename": "gym_gp_live_stats.json",
+    },
+    "Elite_Four": {
+        "users_gist_id": "bb18eda2ea748723d8fe0131dd740b70",
+        "users_filename": "elite_users.json",
+        "online_gist_id": "d9db3a72fed74c496fd6cc830f9ca6e9",
+        "online_filename": "elite_ids.txt",
+        "vip_gist_id": "5f2f23e0391882ab4e255bd67e98334a",
+        "vip_filename": "elite_vip.txt",
+        "live_gist_id": "4773653072f4851e91958a333e503de9",
+        "live_filename": "gp_live_stats.json",
+    },
+}
+
+group_locks = defaultdict(asyncio.Lock)
 # =========================================================
 # CLASE TEMPLATE
 # =========================================================
@@ -522,6 +576,75 @@ async def download_attachment_to_file(att: discord.Attachment, save_path: Path) 
         logger.warning("No se pudo guardar attachment %s: %s", att.filename, e)
         return None
 
+# =========================================================
+# HELPERS GITHUB GIST
+# =========================================================
+
+async def github_get_gist(gist_id: str) -> dict:
+    url = f"https://api.github.com/gists/{gist_id}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"GET gist failed {resp.status}: {gist_id}")
+            return await resp.json()
+
+
+async def github_patch_gist_file(gist_id: str, filename: str, content: str) -> None:
+    url = f"https://api.github.com/gists/{gist_id}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "files": {
+            filename: {
+                "content": content
+            }
+        }
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.patch(url, headers=headers, json=payload) as resp:
+            if resp.status not in (200, 201):
+                text = await resp.text()
+                raise RuntimeError(f"PATCH gist failed {resp.status}: {text}")
+
+
+async def gist_load_json(gist_id: str, filename: str, default):
+    try:
+        data = await github_get_gist(gist_id)
+        file_obj = data.get("files", {}).get(filename)
+        if not file_obj or not file_obj.get("content"):
+            return default
+        return json.loads(file_obj["content"])
+    except Exception as e:
+        logger.warning("gist_load_json error %s/%s: %s", gist_id, filename, e)
+        return default
+
+
+async def gist_save_json(gist_id: str, filename: str, data) -> None:
+    await github_patch_gist_file(gist_id, filename, json.dumps(data, indent=2))
+
+
+async def gist_load_text(gist_id: str, filename: Optional[str] = None) -> str:
+    data = await github_get_gist(gist_id)
+    files = data.get("files", {})
+    if filename:
+        file_obj = files.get(filename)
+        return file_obj.get("content", "") if file_obj else ""
+
+    # fallback: primer archivo
+    if not files:
+        return ""
+    first_key = next(iter(files))
+    return files[first_key].get("content", "")
+
 async def collect_message_attachments(message: discord.Message) -> List[discord.File]:
     files: List[discord.File] = []
 
@@ -551,7 +674,8 @@ def parse_heartbeat_metadata(content: str) -> dict:
     lines = [line.strip() for line in content.splitlines() if line.strip()]
 
     result = {
-        "obtainer_user": None,
+        "obtainer_user": extract_first_line_username_hint(content),
+        "owner_discord_id": extract_owner_discord_id_from_first_line(content),
         "bot_name": None,
         "game_id": None,
         "packs_count": None,
@@ -560,10 +684,8 @@ def parse_heartbeat_metadata(content: str) -> dict:
     }
 
     for line in lines:
-        # 👇 ESTE ES EL USUARIO REAL
         m = re.match(r"^(.+?)\s*\((\d+)\)$", line)
         if m:
-            result["obtainer_user"] = m.group(1).strip()
             result["bot_name"] = m.group(1).strip()
             result["game_id"] = m.group(2).strip()
             continue
@@ -580,7 +702,232 @@ def parse_heartbeat_metadata(content: str) -> dict:
 
     return result
 
+def get_group_from_channel(channel_id: int) -> Optional[str]:
+    return CHANNEL_GROUP_MAP.get(channel_id)
 
+
+def extract_owner_discord_id_from_first_line(content: str) -> Optional[str]:
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    if not lines:
+        return None
+
+    first = lines[0]
+
+    # <@123> o <@!123>
+    m = re.search(r"<@!?(\d+)>", first)
+    if m:
+        return m.group(1)
+
+    return None
+
+
+def extract_first_line_username_hint(content: str) -> Optional[str]:
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    if not lines:
+        return None
+
+    first = lines[0]
+
+    # @wR98 Gold star for you!
+    m = re.match(r"^@([^\s]+)", first)
+    if m:
+        return m.group(1).strip()
+
+    return None
+
+
+def extract_friend_id(content: str) -> Optional[str]:
+    m = re.search(r"\b(\d{16})\b", content)
+    if m:
+        return m.group(1)
+    return None
+    
+async def load_group_users(group: str) -> dict:
+    config = GROUP_CONFIG.get(group)
+    if not config:
+        return {}
+    return await gist_load_json(
+        config["users_gist_id"],
+        config["users_filename"],
+        {}
+    )
+
+
+async def resolve_gp_owner(content: str, group: str) -> dict:
+    users = await load_group_users(group)
+
+    owner_discord_id = extract_owner_discord_id_from_first_line(content)
+    username_hint = extract_first_line_username_hint(content)
+
+    if owner_discord_id and owner_discord_id in users:
+        user_info = users[owner_discord_id]
+        return {
+            "discord_id": owner_discord_id,
+            "display_name": user_info.get("name") or username_hint or owner_discord_id,
+            "mention": f"<@{owner_discord_id}>",
+        }
+
+    # fallback por nombre si no vino mención
+    if username_hint:
+        lowered = username_hint.lower()
+        for discord_id, user_info in users.items():
+            name = str(user_info.get("name", "")).lower()
+            if name == lowered:
+                return {
+                    "discord_id": discord_id,
+                    "display_name": user_info.get("name") or username_hint,
+                    "mention": f"<@{discord_id}>",
+                }
+
+    return {
+        "discord_id": owner_discord_id,
+        "display_name": username_hint or "desconocido",
+        "mention": f"<@{owner_discord_id}>" if owner_discord_id else "@desconocido",
+    }
+    
+async def add_vip_id(friend_id: str, group: str) -> bool:
+    if not friend_id:
+        return False
+
+    config = GROUP_CONFIG.get(group)
+    if not config:
+        return False
+
+    try:
+        content = await gist_load_text(config["vip_gist_id"], config["vip_filename"])
+        ids = [x.strip() for x in content.splitlines() if x.strip()]
+
+        if friend_id in ids:
+            logger.info("VIP ya existe en %s: %s", group, friend_id)
+            return False
+
+        ids.append(friend_id)
+        await github_patch_gist_file(
+            config["vip_gist_id"],
+            config["vip_filename"],
+            "\n".join(ids)
+        )
+        logger.info("VIP agregado en %s: %s", group, friend_id)
+        return True
+    except Exception as e:
+        logger.exception("add_vip_id error: %s", e)
+        return False
+
+async def load_users_gp() -> dict:
+    return await gist_load_json(USERS_GP_GIST_ID, USERS_GP_FILE, {})
+
+
+async def save_users_gp(data: dict) -> None:
+    await gist_save_json(USERS_GP_GIST_ID, USERS_GP_FILE, data)
+
+
+async def register_user_gp(owner_info: dict) -> None:
+    discord_id = owner_info.get("discord_id")
+    if not discord_id:
+        return
+
+    data = await load_users_gp()
+
+    if discord_id not in data:
+        data[discord_id] = {
+            "name": owner_info.get("display_name", "Unknown"),
+            "gp": 0
+        }
+
+    data[discord_id]["gp"] += 1
+    data[discord_id]["name"] = owner_info.get("display_name", "Unknown")
+
+    await save_users_gp(data)
+
+
+async def get_online_mentions(group: str) -> List[str]:
+    config = GROUP_CONFIG.get(group)
+    if not config:
+        return []
+
+    try:
+        online_text = await gist_load_text(config["online_gist_id"], config["online_filename"])
+        online_ids = [x.strip() for x in online_text.splitlines() if x.strip()]
+
+        users = await load_group_users(group)
+
+        mentions = []
+        for discord_id, user_info in users.items():
+            main_id = str(user_info.get("main_id", "")).strip()
+            sec_id = str(user_info.get("sec_id", "")).strip()
+
+            if main_id in online_ids or (sec_id and sec_id in online_ids):
+                mentions.append(f"<@{discord_id}>")
+
+        return mentions
+    except Exception as e:
+        logger.exception("get_online_mentions error: %s", e)
+        return []
+
+def get_utc6_date_string() -> str:
+    now_utc = datetime.now(timezone.utc)
+    utc6 = now_utc - timedelta(hours=6)
+    return utc6.date().isoformat()
+
+async def load_live_stats(group: str) -> dict:
+    config = GROUP_CONFIG.get(group)
+    if not config:
+        return {}
+
+    return await gist_load_json(
+        config["live_gist_id"],
+        config["live_filename"],
+        {
+            "totalGP": 0,
+            "totalAlive": 0,
+            "currentDay": None,
+            "daily": {"gp": 0, "alive": 0},
+            "history": [],
+            "processedMessages": [],
+        }
+    )
+
+
+async def save_live_stats(group: str, stats: dict) -> None:
+    config = GROUP_CONFIG.get(group)
+    if not config:
+        return
+
+    await gist_save_json(config["live_gist_id"], config["live_filename"], stats)
+
+
+async def check_daily_reset(group: str, stats: dict) -> dict:
+    today = get_utc6_date_string()
+
+    if not stats.get("currentDay"):
+        stats["currentDay"] = today
+        return stats
+
+    if stats["currentDay"] != today:
+        stats["history"].insert(0, {
+            "date": stats["currentDay"],
+            "gp": stats["daily"]["gp"],
+            "alive": stats["daily"]["alive"],
+        })
+        stats["history"] = stats["history"][:5]
+        stats["currentDay"] = today
+        stats["daily"] = {"gp": 0, "alive": 0}
+
+    return stats
+
+
+async def update_stats_safe(group: str, callback):
+    async with group_locks[group]:
+        stats = await load_live_stats(group)
+        stats = await check_daily_reset(group, stats)
+        stats = await callback(stats)
+        await save_live_stats(group, stats)
+        return stats
+
+async def increment_gp_callback(stats: dict) -> dict:
+    stats["totalGP"] += 1
+    stats["daily"]["gp"] += 1
+    return stats
 
 def build_pack_rarity_label(detected_cards: List[Optional["TemplateCard"]]) -> str:
     one_star = 0
@@ -637,7 +984,7 @@ def build_final_poster(
     return final_img
 
 def build_forum_post_text(meta: dict, pack_label: str) -> str:
-    obtainer = f"@{meta['obtainer_user']}" if meta.get("obtainer_user") else "@desconocido"
+    obtainer = meta.get("owner_mention") or "@desconocido"
     bot_name = meta.get("bot_name") or "UnknownBot"
     game_id = meta.get("game_id") or "UnknownID"
     packs_count = meta.get("packs_count")
@@ -689,7 +1036,10 @@ async def create_forum_post_with_image(
         )
 
         thread = created.thread if hasattr(created, "thread") else created
-        return thread.jump_url
+        return {
+            "thread": thread,
+            "jump_url": thread.jump_url
+        }
 
     except Exception as e:
         logger.exception("No se pudo crear el post del foro: %s", e)
@@ -714,7 +1064,7 @@ class ForumLinkView(discord.ui.View):
 
 
 def build_log_summary(meta: dict, pack_label: str, debug_lines: List[str]) -> str:
-    obtainer = f"@{meta['obtainer_user']}" if meta.get("obtainer_user") else "@desconocido"
+    obtainer = meta.get("owner_mention") or "@desconocido"
     bot_name = meta.get("bot_name") or "UnknownBot"
     game_id = meta.get("game_id") or "UnknownID"
     packs_count = meta.get("packs_count")
@@ -832,7 +1182,85 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
         "final_image_path": out_hd,
     }
 
+# =========================================================
+# VOTOS GP
+# =========================================================
 
+async def load_vote_state() -> dict:
+    return await gist_load_json(GP_VOTE_GIST_ID, GP_VOTE_FILE, {})
+
+
+async def save_vote_state(data: dict) -> None:
+    await gist_save_json(GP_VOTE_GIST_ID, GP_VOTE_FILE, data)
+
+
+class GPVoteView(discord.ui.View):
+    def __init__(self, vote_key: str, group: str):
+        super().__init__(timeout=None)
+        self.vote_key = vote_key
+        self.group = group
+
+    @discord.ui.button(label="🟢 Alive (0)", style=discord.ButtonStyle.success, custom_id="gp_alive")
+    async def alive_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_vote(interaction, "alive")
+
+    @discord.ui.button(label="🔴 Dead (0)", style=discord.ButtonStyle.danger, custom_id="gp_dead")
+    async def dead_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_vote(interaction, "dead")
+
+    async def handle_vote(self, interaction: discord.Interaction, vote_type: str):
+        data = await load_vote_state()
+        state = data.get(self.vote_key)
+
+        if not state:
+            await interaction.response.send_message("No se encontró estado de voto.", ephemeral=True)
+            return
+
+        user_id = str(interaction.user.id)
+
+        if user_id in state["alive_users"] or user_id in state["dead_users"]:
+            await interaction.response.send_message("Ya votaste en este GP.", ephemeral=True)
+            return
+
+        if vote_type == "alive":
+            state["alive_users"].append(user_id)
+        else:
+            state["dead_users"].append(user_id)
+
+        alive_count = len(state["alive_users"])
+        dead_count = len(state["dead_users"])
+
+        status = state.get("status", "none")
+        if alive_count >= 1:
+            status = "alive"
+        elif dead_count >= 4:
+            status = "dead"
+
+        state["status"] = status
+
+        if status == "alive" and not state.get("counted_alive", False):
+            await update_stats_safe(self.group, self._increment_alive)
+            state["counted_alive"] = True
+
+        data[self.vote_key] = state
+        await save_vote_state(data)
+
+        for child in self.children:
+            if child.custom_id == "gp_alive":
+                child.label = f"🟢 Alive ({alive_count})"
+            elif child.custom_id == "gp_dead":
+                child.label = f"🔴 Dead ({dead_count})"
+
+        if status in ("alive", "dead"):
+            for child in self.children:
+                child.disabled = True
+
+        await interaction.response.edit_message(view=self)
+
+    async def _increment_alive(self, stats: dict) -> dict:
+        stats["totalAlive"] += 1
+        stats["daily"]["alive"] += 1
+        return stats
 # =========================================================
 # BOT DISCORD
 # =========================================================
@@ -895,18 +1323,71 @@ async def on_message(message: discord.Message):
             PROCESSED_MESSAGES.clear()
 
         result = await asyncio.to_thread(process_gp_image, source_img, message.id, message.content)
+        group = get_group_from_channel(message.channel.id)
+        if not group:
+            logger.warning("Canal sin grupo configurado: %s", message.channel.id)
+            return
 
+        owner_info = await resolve_gp_owner(message.content, group)
+        friend_id = extract_friend_id(message.content)
+
+        # Enriquecer meta para el post
+        result["heartbeat_meta"]["owner_discord_id"] = owner_info.get("discord_id")
+        result["heartbeat_meta"]["owner_display_name"] = owner_info.get("display_name")
+        result["heartbeat_meta"]["owner_mention"] = owner_info.get("mention")
+
+        if friend_id:
+            await add_vip_id(friend_id, group)
+
+        await register_user_gp(owner_info)
+
+        await update_stats_safe(group, increment_gp_callback)
+
+        post_data = None
         post_url = None
+        post_thread = None
+
         if result["final_image_path"] is not None:
             post_title = build_post_title(result["heartbeat_meta"], result["pack_label"])
             post_body = build_forum_post_text(result["heartbeat_meta"], result["pack_label"])
 
-            post_url = await create_forum_post_with_image(
+            post_data = await create_forum_post_with_image(
                 client=client,
                 title=post_title,
                 body_text=post_body,
                 image_path=result["final_image_path"],
             )
+
+        if post_data:
+            post_thread = post_data["thread"]
+            post_url = post_data["jump_url"]
+
+            if post_thread is not None:
+                online_mentions = await get_online_mentions(group)
+                if online_mentions:
+                    await post_thread.send(
+                        content=" ".join(online_mentions),
+                        allowed_mentions=discord.AllowedMentions(users=True)
+                    )
+
+                vote_key = str(post_thread.id)
+                vote_data = await load_vote_state()
+
+                if vote_key not in vote_data:
+                    vote_data[vote_key] = {
+                        "group": group,
+                        "owner_discord_id": owner_info.get("discord_id"),
+                        "friend_id": friend_id,
+                        "status": "none",
+                        "alive_users": [],
+                        "dead_users": [],
+                        "counted_alive": False,
+                    }
+
+                await save_vote_state(vote_data)
+
+                vote_view = GPVoteView(vote_key=vote_key, group=group)
+                await post_thread.send("Estado del GP:", view=vote_view)
 
         view = ForumLinkView(
             post_url,
