@@ -941,6 +941,10 @@ async def on_message(message: discord.Message):
                     log_channel = None
 
             if log_channel is not None:
+                # 1) reenviar el mensaje original completo
+                forwarded_msg = await message.forward(log_channel)
+
+                # 2) mandar resumen corto + imágenes debug
                 log_summary = build_log_summary(
                     result["heartbeat_meta"],
                     result["pack_label"],
@@ -952,26 +956,12 @@ async def on_message(message: discord.Message):
                     discord.File(str(result["debug_path"]), filename="gp_debug.png"),
                 ]
 
-                original_attachment_files = []
-                for idx, att in enumerate(message.attachments[:2], start=1):
-                    saved_path = OUTPUT_DIR / f"original_{message.id}_{idx}_{att.filename}"
-                    saved = await download_attachment_to_file(att, saved_path)
-                    if saved:
-                        original_attachment_files.append(
-                            discord.File(str(saved), filename=saved.name)
-                        )
-
-                log_files.extend(original_attachment_files)
-
                 sent_log = await log_channel.send(
-                    content=(
-                        f"{log_summary}\n"
-                        f"**Mensaje original:**\n"
-                        f"```{message.content[:1800]}```"
-                    ),
+                    content=log_summary,
                     files=log_files
                 )
 
+                asyncio.create_task(delete_message_later(forwarded_msg, 172800))
                 asyncio.create_task(delete_message_later(sent_log, 172800))
     except Exception as e:
         logger.exception("on_message: %s", e)
