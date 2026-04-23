@@ -948,20 +948,14 @@ async def on_message(message: discord.Message):
                     log_channel = None
 
             if log_channel is not None:
+                # 1) reenviar el mensaje original completo
+                forwarded_msg = await message.forward(log_channel)
+
+                # 2) mandar resumen corto + imágenes debug
                 log_summary = build_log_summary(
                     result["heartbeat_meta"],
                     result["pack_label"],
                     result.get("debug_lines", [])
-                )
-
-                original_files = await collect_message_attachments(message)
-
-                # mensaje original copiado manualmente
-                original_text = message.content or "(sin texto)"
-
-                sent_original = await log_channel.send(
-                    content=f"**Mensaje original:**\n```{original_text[:1800]}```",
-                    files=original_files if original_files else None
                 )
 
                 log_files = [
@@ -974,17 +968,15 @@ async def on_message(message: discord.Message):
                     files=log_files
                 )
 
-                asyncio.create_task(delete_message_later(sent_original, 172800))
+                asyncio.create_task(delete_message_later(forwarded_msg, 172800))
                 asyncio.create_task(delete_message_later(sent_log, 172800))
-
-        try:
-            await message.delete()
-        except Exception as e:
-            logger.warning("No se pudo borrar el mensaje original: %s", e)
+    except Exception as e:
+        logger.exception("on_message: %s", e)
 
         # =========================
         # 2. ENVÍO COMPLETO A CANAL DE REGISTRO
         # =========================
+
 
 
 # =========================================================
