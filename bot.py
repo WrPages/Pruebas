@@ -723,16 +723,10 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
             "final_image_path": None,
         }
 
-    hd_canvas = build_hd_canvas(detected_cards)
-    final_poster = build_final_poster(
-        hd_canvas=hd_canvas,
-        pack_label=pack_label,
-        packs_count=meta.get("packs_count"),
-        bot_name=meta.get("bot_name"),
-    )
+hd_canvas = build_hd_canvas(detected_cards)
 
-    out_hd = OUTPUT_DIR / f"gp_hd_{message_id}.png"
-    final_poster.save(out_hd)
+out_hd = OUTPUT_DIR / f"gp_hd_{message_id}.png"
+hd_canvas.save(out_hd)
 
     reply_text = "Reconstrucción HD del GP\n\n"
     reply_text += f"{pack_label} "
