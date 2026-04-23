@@ -513,7 +513,14 @@ async def get_best_gp_image_attachment(message: discord.Message) -> Optional[Tup
 
     return None
 
-
+async def download_attachment_to_file(att: discord.Attachment, save_path: Path) -> Optional[Path]:
+    try:
+        data = await att.read()
+        save_path.write_bytes(data)
+        return save_path
+    except Exception as e:
+        logger.warning("No se pudo guardar attachment %s: %s", att.filename, e)
+        return None
 
 def is_target_message(message: discord.Message) -> bool:
     if message.webhook_id is None:
@@ -703,12 +710,8 @@ def build_log_summary(meta: dict, pack_label: str, debug_lines: List[str]) -> st
     packs_text = f"[{packs_count}P]" if packs_count is not None else "[?P]"
     filename = meta.get("filename") or "unknown_file.xml"
 
-    compact_top = []
-    for line in debug_lines:
-        if line.startswith("Slot ") or line.startswith("Top "):
-            compact_top.append(line)
-
-    compact_top = compact_top[:10]
+    slot_lines = [line for line in debug_lines if line.startswith("Slot ")]
+    slot_lines = slot_lines[:5]
 
     return (
         f"**Resumen GP**\n"
@@ -717,7 +720,7 @@ def build_log_summary(meta: dict, pack_label: str, debug_lines: List[str]) -> st
         f"{bot_name} ({game_id})\n"
         f"{pack_label}{packs_text}[MegaShine]\n"
         f"{filename}\n\n"
-        + "\n".join(compact_top) +
+        + "\n".join(slot_lines) +
         f"```"
     )
 
@@ -920,6 +923,10 @@ async def on_message(message: discord.Message):
                 "No se pudo generar la imagen HD.",
                 mention_author=False
             )
+        try:
+            await message.delete()
+        except Exception as e:
+            logger.warning("No se pudo borrar el mensaje original: %s", e)
 
         # =========================
         # 2. ENVÍO COMPLETO A CANAL DE REGISTRO
@@ -944,6 +951,17 @@ async def on_message(message: discord.Message):
                     discord.File(str(result["overlay_path"]), filename="box_overlay.png"),
                     discord.File(str(result["debug_path"]), filename="gp_debug.png"),
                 ]
+
+                original_attachment_files = []
+                for idx, att in enumerate(message.attachments[:2], start=1):
+                    saved_path = OUTPUT_DIR / f"original_{message.id}_{idx}_{att.filename}"
+                    saved = await download_attachment_to_file(att, saved_path)
+                    if saved:
+                        original_attachment_files.append(
+                            discord.File(str(saved), filename=saved.name)
+                        )
+
+                log_files.extend(original_attachment_files)
 
                 sent_log = await log_channel.send(
                     content=(
