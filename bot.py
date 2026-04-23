@@ -577,7 +577,7 @@ def build_final_poster(
     final_img.alpha_composite(hd_canvas, (0, 0))
 
     draw = ImageDraw.Draw(final_img)
-    font = get_font(34)
+    font = get_font(72)
 
     packs_text = f"[{packs_count}P]" if packs_count is not None else "[?P]"
     bot_text = bot_name or "UnknownBot"
