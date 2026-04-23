@@ -19,6 +19,7 @@ DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "")
 CLIENT_ID = int(os.environ.get("CLIENT_ID", "0"))
 TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", "0"))
 FORUM_CHANNEL_ID = int(os.environ.get("FORUM_CHANNEL_ID", "0"))
+LOG_CHANNEL_ID = int(os.environ.get("LOG_CHANNEL_ID", "0"))
 
 # =========================================================
 # RUTAS
@@ -687,11 +688,47 @@ class ForumLinkView(discord.ui.View):
 
         self.add_item(
             discord.ui.Button(
-                label=label[:80],  # límite Discord
+                label=label[:80],
                 style=discord.ButtonStyle.link,
                 url=post_url
             )
         )
+
+
+def build_log_summary(meta: dict, pack_label: str, debug_lines: List[str]) -> str:
+    obtainer = f"@{meta['obtainer_user']}" if meta.get("obtainer_user") else "@desconocido"
+    bot_name = meta.get("bot_name") or "UnknownBot"
+    game_id = meta.get("game_id") or "UnknownID"
+    packs_count = meta.get("packs_count")
+    packs_text = f"[{packs_count}P]" if packs_count is not None else "[?P]"
+    filename = meta.get("filename") or "unknown_file.xml"
+
+    compact_top = []
+    for line in debug_lines:
+        if line.startswith("Slot ") or line.startswith("Top "):
+            compact_top.append(line)
+
+    compact_top = compact_top[:10]
+
+    return (
+        f"**Resumen GP**\n"
+        f"```"
+        f"{obtainer}\n"
+        f"{bot_name} ({game_id})\n"
+        f"{pack_label}{packs_text}[MegaShine]\n"
+        f"{filename}\n\n"
+        + "\n".join(compact_top) +
+        f"```"
+    )
+
+
+async def delete_message_later(message: discord.Message, delay_seconds: int = 172800):
+    try:
+        await asyncio.sleep(delay_seconds)
+        await message.delete()
+    except Exception:
+        pass
+        
 def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: str) -> dict:
     logger.info("Procesando imagen para message_id=%s", message_id)
 
@@ -743,7 +780,8 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
             "found_count": found_count,
             "overlay_path": overlay_path,
             "debug_path": out_debug,
-            "reply_text": "No se detectó ninguna carta. Revisa overlay y debug.",
+            "reply_text": "No se detectó ninguna carta",
+            "debug_lines": debug_lines,
             "files": [
                 discord.File(str(overlay_path), filename="box_overlay.png"),
                 discord.File(str(out_debug), filename="gp_debug.png"),
@@ -769,6 +807,7 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
         "overlay_path": overlay_path,
         "debug_path": out_debug,
         "reply_text": reply_text,
+        "debug_lines": debug_lines,
         "files": [
             discord.File(str(out_hd), filename="gp_hd.png"),
             discord.File(str(overlay_path), filename="box_overlay.png"),
@@ -856,22 +895,60 @@ async def on_message(message: discord.Message):
             )
 
         view = ForumLinkView(
-    post_url,
-    result["heartbeat_meta"],
-    result["pack_label"]
-)
+            post_url,
+            result["heartbeat_meta"],
+            result["pack_label"]
+        ) if post_url else None
+
+        # =========================
+        # 1. RESPUESTA LIMPIA EN CANAL ORIGINAL
+        # =========================
+        original_files = []
+        if result["final_image_path"] is not None:
+            original_files.append(
+                discord.File(str(result["final_image_path"]), filename="gp_hd.png")
+            )
 
         await message.reply(
-            result["reply_text"],
-            files=result["files"],
+            files=original_files,
             view=view,
             mention_author=False
         )
 
-        logger.info("Procesado mensaje %s - detectadas %s/5", message.id, result["found_count"])
+        # =========================
+        # 2. ENVÍO COMPLETO A CANAL DE REGISTRO
+        # =========================
+        if LOG_CHANNEL_ID:
+            log_channel = client.get_channel(LOG_CHANNEL_ID)
+            if log_channel is None:
+                try:
+                    log_channel = await client.fetch_channel(LOG_CHANNEL_ID)
+                except Exception as e:
+                    logger.exception("No se pudo obtener el canal log: %s", e)
+                    log_channel = None
 
-    except Exception as e:
-        logger.exception("on_message: %s", e)
+            if log_channel is not None:
+                log_summary = build_log_summary(
+                    result["heartbeat_meta"],
+                    result["pack_label"],
+                    result.get("debug_lines", [])
+                )
+
+                log_files = [
+                    discord.File(str(result["overlay_path"]), filename="box_overlay.png"),
+                    discord.File(str(result["debug_path"]), filename="gp_debug.png"),
+                ]
+
+                sent_log = await log_channel.send(
+                    content=(
+                        f"{log_summary}\n"
+                        f"**Mensaje original:**\n"
+                        f"```{message.content[:1800]}```"
+                    ),
+                    files=log_files
+                )
+
+                asyncio.create_task(delete_message_later(sent_log, 172800))
 
 # =========================================================
 # MAIN
