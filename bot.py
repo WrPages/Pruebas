@@ -985,40 +985,7 @@ async def on_message(message: discord.Message):
         # =========================
         # 2. ENVÍO COMPLETO A CANAL DE REGISTRO
         # =========================
-        if LOG_CHANNEL_ID:
-            log_channel = client.get_channel(LOG_CHANNEL_ID)
-            if log_channel is None:
-                try:
-                    log_channel = await client.fetch_channel(LOG_CHANNEL_ID)
-                except Exception as e:
-                    logger.exception("No se pudo obtener el canal log: %s", e)
-                    log_channel = None
 
-            if log_channel is not None:
-                # 1) reenviar el mensaje original completo
-                forwarded_msg = await message.forward(log_channel)
-
-                # 2) mandar resumen corto + imágenes debug
-                log_summary = build_log_summary(
-                    result["heartbeat_meta"],
-                    result["pack_label"],
-                    result.get("debug_lines", [])
-                )
-
-                log_files = [
-                    discord.File(str(result["overlay_path"]), filename="box_overlay.png"),
-                    discord.File(str(result["debug_path"]), filename="gp_debug.png"),
-                ]
-
-                sent_log = await log_channel.send(
-                    content=log_summary,
-                    files=log_files
-                )
-
-                asyncio.create_task(delete_message_later(forwarded_msg, 172800))
-                asyncio.create_task(delete_message_later(sent_log, 172800))
-    except Exception as e:
-        logger.exception("on_message: %s", e)
 
 # =========================================================
 # MAIN
