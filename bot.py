@@ -93,9 +93,9 @@ TRIGGER_PATTERNS = [
 VALID_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
 PROCESSED_MESSAGES = set()
 MAX_SCORE_ACCEPT = 2200
-MAX_SCORE_ACCEPT_WITH_GAP = 3300
-MIN_SCORE_GAP = 180
-MIN_CONFIDENCE_RATIO = 1.12
+MAX_SCORE_ACCEPT_WITH_GAP = 3600
+MIN_SCORE_GAP = 140
+MIN_CONFIDENCE_RATIO = 1.10
 SAVE_DEBUG_SLOTS = False
 # Si está True, NO crea imagen HD.
 # Usa la imagen original del webhook para crear el post.
@@ -410,7 +410,7 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
     if best_score <= MAX_SCORE_ACCEPT and gap >= 80:
         return best_t, top_debug
 
-    # Regla 2: match aceptable, pero debe ganar claramente
+    # Regla 2: match aceptable, debe ganar claramente
     if (
         best_score <= MAX_SCORE_ACCEPT_WITH_GAP
         and gap >= MIN_SCORE_GAP
@@ -418,7 +418,11 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
     ):
         return best_t, top_debug
 
-    # Si no gana claramente, NO inventar carta
+    # Regla 3: caso de score bueno pero gap bajo.
+    # Solo aceptar si el score es razonable y NO parece carta nueva/desconocida.
+    if best_score <= 2800 and gap >= 90 and ratio >= 1.06:
+        return best_t, top_debug
+
     return None, top_debug
 
 
