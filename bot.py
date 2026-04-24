@@ -1381,24 +1381,25 @@ class GPVoteView(discord.ui.View):
         data[self.vote_key] = state
         await save_vote_state(self.group, data)
 
-        for child in self.children:
-            if child.custom_id == "gp_alive":
-                child.label = f"🟢 Alive ({alive_count})"
-            elif child.custom_id == "gp_dead":
-                child.label = f"🔴 Dead ({dead_count})"
+   for child in self.children:
+    if child.custom_id == "gp_alive":
+        child.label = f"🟢 Alive ({alive_count})"
+    elif child.custom_id == "gp_dead":
+        child.label = f"🔴 Dead ({dead_count})"
 
-            if status in ("alive", "dead"):
-            await update_gp_thread_status(int(self.vote_key), status)
+# 👇 FUERA del for
+if status in ("alive", "dead"):
+    await update_gp_thread_status(int(self.vote_key), status)
 
-            await update_main_link_button(
-                state,
-                status,
-                state.get("meta", {}),
-                state.get("pack_label", "")
-            )
+    await update_main_link_button(
+        state,
+        status,
+        state.get("meta", {}),
+        state.get("pack_label", "")
+    )
 
-            for child in self.children:
-                child.disabled = True
+    for child in self.children:
+        child.disabled = True
 
         await interaction.response.edit_message(view=self)
 
