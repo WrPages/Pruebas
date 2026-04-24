@@ -1030,25 +1030,22 @@ def build_post_title(meta: dict, pack_label: str) -> str:
     return f"{pack_label} {packs_text} {bot_name}"
 
 def build_forum_info_panel(meta: dict, pack_label: str, online_mentions: List[str]) -> str:
-    obtainer = meta.get("owner_mention") or meta.get("owner_display_name") or "@desconocido"
+    obtainer = meta.get("owner_mention") or meta.get("owner_display_name") or "@unknown"
     bot_name = meta.get("bot_name") or "UnknownBot"
     game_id = meta.get("game_id") or "UnknownID"
     packs_count = meta.get("packs_count")
     packs_text = f"[{packs_count}P]" if packs_count is not None else "[?P]"
     filename = meta.get("filename") or "unknown_file.xml"
 
-    active_text = " ".join(online_mentions) if online_mentions else "Sin usuarios activos"
+    active_text = " ".join(online_mentions) if online_mentions else "No active users"
 
     return (
-        f">>> **GP detectado**\n"
-        f"> **Usuario:** {obtainer}\n"
-        f"> **Bot:** `{bot_name}`\n"
-        f"> **ID:** `{game_id}`\n"
-        f"> **Pack:** `{pack_label}{packs_text}[MegaShine]`\n"
-        f"> **Archivo:** `{filename}`\n\n"
-        f"> **Activos:** {active_text}"
+        f">>> {obtainer}\n"
+        f"> `{bot_name} ({game_id})`\n"
+        f"> `{pack_label}{packs_text}[MegaShine]`\n"
+        f"> `{filename}`\n\n"
+        f"> {active_text}"
     )
-
 async def create_forum_post_with_image(
     client: discord.Client,
     title: str,
@@ -1088,13 +1085,20 @@ async def create_forum_post_with_image(
         return None
         
 class ForumLinkView(discord.ui.View):
-    def __init__(self, post_url: str, meta: dict, pack_label: str):
+    def __init__(self, post_url: str, meta: dict, pack_label: str, status: str = "pending"):
         super().__init__(timeout=None)
 
         packs = meta.get("packs_count", "?")
         bot = meta.get("bot_name", "Bot")
 
-        label = f"{pack_label} [{packs}P] {bot}"
+        if status == "alive":
+            prefix = "✅ Alive"
+        elif status == "dead":
+            prefix = "❌ Dead"
+        else:
+            prefix = "⚪ Pending"
+
+        label = f"{prefix} | {pack_label} [{packs}P] {bot}"
 
         self.add_item(
             discord.ui.Button(
@@ -1510,7 +1514,7 @@ async def on_message(message: discord.Message):
                 vote_view = GPVoteView(vote_key=vote_key, group=group)
 
                 await post_thread.send(
-                    content=f"{info_panel}\n\n**Estado del GP:**",
+                    content=f"{info_panel}\n\n**GP Status:**",
                     view=vote_view,
                     allowed_mentions=discord.AllowedMentions(users=True)
                 )
@@ -1518,7 +1522,8 @@ async def on_message(message: discord.Message):
         view = ForumLinkView(
             post_url,
             result["heartbeat_meta"],
-            result["pack_label"]
+            result["pack_label"],
+            status="pending"
         ) if post_url else None
 
         # =========================
