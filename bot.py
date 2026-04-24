@@ -92,9 +92,10 @@ TRIGGER_PATTERNS = [
 
 VALID_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
 PROCESSED_MESSAGES = set()
-MAX_SCORE_ACCEPT = 1800
-MAX_SCORE_ACCEPT_WITH_GAP = 2500
-MIN_SCORE_GAP = 60
+MAX_SCORE_ACCEPT = 2600
+MAX_SCORE_ACCEPT_WITH_GAP = 4200
+MIN_SCORE_GAP = 35
+MIN_CONFIDENCE_RATIO = 1.03
 SAVE_DEBUG_SLOTS = False
 # Si está True, NO crea imagen HD.
 # Usa la imagen original del webhook para crear el post.
@@ -391,9 +392,10 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
         return None, []
 
     best_t, best_score = ranking[0]
+
     top_debug = [
         (f"{x[0].name} [{x[0].rarity}]", round(x[1], 3))
-        for x in ranking[:5]
+        for x in ranking[:8]
     ]
 
     if len(ranking) > 1:
@@ -404,14 +406,24 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
         gap = 999999.0
         ratio = 999999.0
 
+    # 1) Aceptación directa
     if best_score < MAX_SCORE_ACCEPT:
         return best_t, top_debug
 
-    if best_score < MAX_SCORE_ACCEPT_WITH_GAP and gap > MIN_SCORE_GAP and ratio > MIN_CONFIDENCE_RATIO:
+    # 2) Aceptación si gana con diferencia
+    if best_score < MAX_SCORE_ACCEPT_WITH_GAP and gap > MIN_SCORE_GAP:
+        return best_t, top_debug
+
+    # 3) Aceptación por ratio
+    if best_score < 5200 and ratio > MIN_CONFIDENCE_RATIO:
+        return best_t, top_debug
+
+    # 4) Último fallback: si el score no es absurdo, mejor devolver la mejor carta
+    # para evitar "no detectada" cuando sí hay una carta parecida.
+    if best_score < 6500:
         return best_t, top_debug
 
     return None, top_debug
-
 
 
 def extract_slots(source_img: Image.Image) -> List[np.ndarray]:
