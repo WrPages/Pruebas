@@ -1014,12 +1014,13 @@ def build_forum_post_text(meta: dict, pack_label: str) -> str:
     filename = meta.get("filename") or "unknown_file.xml"
 
     return (
-        f"{obtainer}\n"
-        f"```"
-        f"{bot_name} ({game_id})\n"
+        "```"
+        f"GP found by {obtainer}\n"
         f"{pack_label}{packs_text}[MegaShine]\n"
-        f"{filename}"
-        f"```"
+        f"{bot_name} ({game_id})\n"
+        f"{filename}\n"
+        f"Active: {active_text}"
+        "```"
     )
 
 
