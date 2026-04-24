@@ -1518,13 +1518,8 @@ async def on_message(message: discord.Message):
                 view=view,
                 mention_author=False
             )
-        elif result.get("has_invalid", False):
-            logger.info("GP inválido: no se responde en canal principal, solo log.")
         else:
-            await message.reply(
-                "No se pudo generar la imagen HD.",
-                mention_author=False
-            )
+            logger.info("No se responde en canal principal (GP inválido o incompleto).")
 
         # =========================
         # 2. ENVÍO COMPLETO A CANAL DE REGISTRO
