@@ -1071,29 +1071,30 @@ async def create_forum_post_with_image(
     image_path: Path,
 ) -> Optional[dict]:
 
-    forum_id = GROUP_CONFIG[group]["FORUM_CHANNEL_ID"]
+    try:
+        forum_id = GROUP_CONFIG[group]["FORUM_CHANNEL_ID"]
 
-    channel = client.get_channel(forum_id)
-    if channel is None:
-        channel = await client.fetch_channel(forum_id)
+        channel = client.get_channel(forum_id)
+        if channel is None:
+            channel = await client.fetch_channel(forum_id)
 
-    if not isinstance(channel, discord.ForumChannel):
-        return None
+        if not isinstance(channel, discord.ForumChannel):
+            return None
 
-    file = discord.File(str(image_path), filename=image_path.name)
+        file = discord.File(str(image_path), filename=image_path.name)
 
-    created = await channel.create_thread(
-        name=title,
-        content="‎",
-        file=file,
-    )
+        created = await channel.create_thread(
+            name=title,
+            content="‎",
+            file=file,
+        )
 
-    thread = created.thread if hasattr(created, "thread") else created
+        thread = created.thread if hasattr(created, "thread") else created
 
-    return {
-        "thread": thread,
-        "jump_url": thread.jump_url
-    }
+        return {
+            "thread": thread,
+            "jump_url": thread.jump_url
+        }
 
     except Exception as e:
         logger.exception("No se pudo crear el post del foro: %s", e)
