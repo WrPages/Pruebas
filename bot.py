@@ -1502,7 +1502,7 @@ async def on_message(message: discord.Message):
         # =========================
         original_files = []
 
-        if not result.get("has_invalid", False):
+        if is_valid_gp:
             if MAINTENANCE_USE_ORIGINAL_IMAGE:
                 original_files.append(
                     discord.File(str(original_gp_image_path), filename="gp_original.png")
