@@ -1344,64 +1344,66 @@ class GPVoteView(discord.ui.View):
     async def dead_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.handle_vote(interaction, "dead")
 
-    async def handle_vote(self, interaction: discord.Interaction, vote_type: str):
-        data = await load_vote_state(self.group)
-        state = data.get(self.vote_key)
+async def handle_vote(self, interaction: discord.Interaction, vote_type: str):
+    data = await load_vote_state(self.group)
+    state = data.get(self.vote_key)
 
-        if not state:
-            await interaction.response.send_message("No se encontró estado de voto.", ephemeral=True)
-            return
+    if not state:
+        await interaction.response.send_message("No vote state found.", ephemeral=True)
+        return
 
-        user_id = str(interaction.user.id)
+    user_id = str(interaction.user.id)
 
-        if user_id in state["alive_users"] or user_id in state["dead_users"]:
-            await interaction.response.send_message("Ya votaste en este GP.", ephemeral=True)
-            return
+    if user_id in state["alive_users"] or user_id in state["dead_users"]:
+        await interaction.response.send_message("You already voted.", ephemeral=True)
+        return
 
-        if vote_type == "alive":
-            state["alive_users"].append(user_id)
-        else:
-            state["dead_users"].append(user_id)
+    if vote_type == "alive":
+        state["alive_users"].append(user_id)
+    else:
+        state["dead_users"].append(user_id)
 
-        alive_count = len(state["alive_users"])
-        dead_count = len(state["dead_users"])
+    alive_count = len(state["alive_users"])
+    dead_count = len(state["dead_users"])
 
-        status = state.get("status", "none")
-        if alive_count >= 1:
-            status = "alive"
-        elif dead_count >= 4:
-            status = "dead"
+    status = state.get("status", "none")
 
-        state["status"] = status
+    if alive_count >= 1:
+        status = "alive"
+    elif dead_count >= 4:
+        status = "dead"
 
-        if status == "alive" and not state.get("counted_alive", False):
-            await update_stats_safe(self.group, self._increment_alive)
-            state["counted_alive"] = True
+    state["status"] = status
 
-        data[self.vote_key] = state
-        await save_vote_state(self.group, data)
+    if status == "alive" and not state.get("counted_alive", False):
+        await update_stats_safe(self.group, self._increment_alive)
+        state["counted_alive"] = True
 
-   for child in self.children:
-    if child.custom_id == "gp_alive":
-        child.label = f"🟢 Alive ({alive_count})"
-    elif child.custom_id == "gp_dead":
-        child.label = f"🔴 Dead ({dead_count})"
+    data[self.vote_key] = state
+    await save_vote_state(self.group, data)
 
-# 👇 FUERA del for
-if status in ("alive", "dead"):
-    await update_gp_thread_status(int(self.vote_key), status)
-
-    await update_main_link_button(
-        state,
-        status,
-        state.get("meta", {}),
-        state.get("pack_label", "")
-    )
-
+    # ===== ACTUALIZAR BOTONES =====
     for child in self.children:
-        child.disabled = True
+        if child.custom_id == "gp_alive":
+            child.label = f"🟢 Alive ({alive_count})"
+        elif child.custom_id == "gp_dead":
+            child.label = f"🔴 Dead ({dead_count})"
 
-        await interaction.response.edit_message(view=self)
+    # ===== STATUS FINAL =====
+    if status in ("alive", "dead"):
+        await update_gp_thread_status(int(self.vote_key), status)
+
+        await update_main_link_button(
+            state,
+            status,
+            state.get("meta", {}),
+            state.get("pack_label", "")
+        )
+
+        #for child in self.children:
+            child.disabled = True
+
+    await interaction.response.edit_message(view=self)
 
     async def _increment_alive(self, stats: dict) -> dict:
         stats["totalAlive"] += 1
