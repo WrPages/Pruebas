@@ -1099,6 +1099,7 @@ class ForumLinkView(discord.ui.View):
         packs = meta.get("packs_count", "?")
         bot = meta.get("bot_name", "Bot")
         game_id = meta.get("game_id", "ID")
+        owner = meta.get("owner_display_name") or "unknown"
 
         if status == "alive":
             prefix = "✅"
@@ -1107,7 +1108,7 @@ class ForumLinkView(discord.ui.View):
         else:
             prefix = ""
 
-        label = f"{prefix} {pack_label} [{packs}P] {bot} [{game_id}]".strip()
+        label = f"{prefix} {owner} | {pack_label} [{packs}P] {bot} [{game_id}]".strip()
 
         self.add_item(
             discord.ui.Button(
