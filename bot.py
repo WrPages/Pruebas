@@ -1005,8 +1005,8 @@ def build_final_poster(
     return final_img
 
 def build_forum_post_text(meta: dict, pack_label: str) -> str:
-    #obtainer = meta.get("owner_mention") or meta.get("owner_display_name") or "@desconocido"
-    obtainer = meta.get("owner_display_name") or meta.get("owner_mention") or "@desconocido"
+    obtainer = meta.get("owner_mention") or meta.get("owner_display_name") or "@desconocido"
+    #obtainer = meta.get("owner_display_name") or meta.get("owner_mention") or "@desconocido"
     bot_name = meta.get("bot_name") or "UnknownBot"
     game_id = meta.get("game_id") or "UnknownID"
     packs_count = meta.get("packs_count")
