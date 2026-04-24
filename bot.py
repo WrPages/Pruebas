@@ -1005,19 +1005,22 @@ def build_final_poster(
     return final_img
 
 def build_forum_post_text(meta: dict, pack_label: str) -> str:
-    obtainer = meta.get("owner_mention") or "@desconocido"
+    #obtainer = meta.get("owner_mention") or meta.get("owner_display_name") or "@desconocido"
+    obtainer = meta.get("owner_display_name") or meta.get("owner_mention") or "@desconocido"
     bot_name = meta.get("bot_name") or "UnknownBot"
     game_id = meta.get("game_id") or "UnknownID"
     packs_count = meta.get("packs_count")
     packs_text = f"[{packs_count}P]" if packs_count is not None else "[?P]"
     filename = meta.get("filename") or "unknown_file.xml"
 
-    return f"""```
-{obtainer}
-{bot_name} ({game_id})
-{pack_label}{packs_text}[MegaShine]
-{filename}
-```"""
+    return (
+        f"{obtainer}\n"
+        f"```"
+        f"{bot_name} ({game_id})\n"
+        f"{pack_label}{packs_text}[MegaShine]\n"
+        f"{filename}"
+        f"```"
+    )
 
 def build_post_title(meta: dict, pack_label: str) -> str:
     packs_count = meta.get("packs_count")
@@ -1421,10 +1424,15 @@ async def on_message(message: discord.Message):
         result["heartbeat_meta"]["owner_display_name"] = owner_info.get("display_name")
         result["heartbeat_meta"]["owner_mention"] = owner_info.get("mention")
 
-        if friend_id:
-            await add_vip_id(friend_id, group)
+        is_valid_gp = (
+            not result.get("has_invalid", False)
+            and result.get("found_count", 0) == 5
+        )
 
-        if not result.get("has_invalid", False):
+        if is_valid_gp:
+            if friend_id:
+                await add_vip_id(friend_id, group)
+
             await register_user_gp(owner_info)
             await update_stats_safe(group, increment_gp_callback)
 
@@ -1432,7 +1440,7 @@ async def on_message(message: discord.Message):
         post_url = None
         post_thread = None
 
-        should_create_post = not result.get("has_invalid", False)
+        should_create_post = is_valid_gp
 
         post_image_path = None
         if should_create_post:
