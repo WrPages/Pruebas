@@ -777,36 +777,81 @@ async def load_group_users(group: str) -> dict:
     )
 
 
-async def resolve_gp_owner(content: str, group: str) -> dict:
-    users = await load_group_users(group)
 
-    owner_discord_id = extract_owner_discord_id_from_first_line(content)
-    username_hint = extract_first_line_username_hint(content)
+async def resolve_gp_owner(client, content: str, group: str):
+    """
+    Detecta quién obtuvo el GP a partir del mensaje del webhook.
+    Prioridad:
+    1. Mención <@id>
+    2. Username tipo @nombre
+    3. Buscar en Gist (por nombre)
+    4. Buscar en Discord API
+    5. Fallback a ID o texto
+    """
+
+    owner_discord_id = None
+    username_hint = None
+
+    # =========================
+    # 1. DETECTAR MENCIÓN <@id> o <@!id>
+    # =========================
+    mention_match = re.search(r"<@!?(\d+)>", content)
+    if mention_match:
+        owner_discord_id = mention_match.group(1)
+
+    # =========================
+    # 2. DETECTAR @username
+    # =========================
+    username_match = re.search(r"@([a-zA-Z0-9_\.]+)", content)
+    if username_match:
+        username_hint = username_match.group(1)
+
+    # =========================
+    # 3. BUSCAR EN GIST DEL GRUPO
+    # =========================
+    users = await load_group_users(group)  # ya tienes esta función
 
     if owner_discord_id and owner_discord_id in users:
-        user_info = users[owner_discord_id]
+        user_data = users[owner_discord_id]
         return {
             "discord_id": owner_discord_id,
-            "display_name": username_hint or owner_discord_id or "unknown",
-            "mention": f"<@{owner_discord_id}>" if owner_discord_id else "@unknown",
+            "display_name": user_data.get("name") or owner_discord_id,
+            "mention": f"<@{owner_discord_id}>",
         }
 
-    # fallback por nombre si no vino mención
+    # =========================
+    # 4. BUSCAR POR NOMBRE EN GIST
+    # =========================
     if username_hint:
-        lowered = username_hint.lower()
-        for discord_id, user_info in users.items():
-            name = str(user_info.get("name", "")).lower()
-            if name == lowered:
+        for uid, data in users.items():
+            if data.get("name", "").lower() == username_hint.lower():
                 return {
-                    "discord_id": discord_id,
-                    "display_name": user_info.get("name") or username_hint,
-                    "mention": f"<@{discord_id}>",
+                    "discord_id": uid,
+                    "display_name": data.get("name"),
+                    "mention": f"<@{uid}>",
                 }
 
+    # =========================
+    # 5. BUSCAR EN DISCORD API
+    # =========================
+    if owner_discord_id:
+        try:
+            user = await client.fetch_user(int(owner_discord_id))
+            return {
+                "discord_id": owner_discord_id,
+                "display_name": user.name,
+                "mention": f"<@{owner_discord_id}>",
+            }
+        except Exception:
+            pass
+
+    # =========================
+    # 6. FALLBACK FINAL
+    # =========================
     return {
         "discord_id": owner_discord_id,
-        "display_name": username_hint or "desconocido",
-        "mention": f"<@{owner_discord_id}>" if owner_discord_id else "@desconocido",
+        "display_name": username_hint or owner_discord_id or "unknown",
+        "mention": f"<@{owner_discord_id}>" if owner_discord_id else "@unknown",
     }
     
 async def add_vip_id(friend_id: str, group: str) -> bool:
