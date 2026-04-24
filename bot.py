@@ -96,6 +96,9 @@ MAX_SCORE_ACCEPT = 1800
 MAX_SCORE_ACCEPT_WITH_GAP = 2500
 MIN_SCORE_GAP = 60
 SAVE_DEBUG_SLOTS = False
+# Si está True, NO crea imagen HD.
+# Usa la imagen original del webhook para crear el post.
+MAINTENANCE_USE_ORIGINAL_IMAGE = False
 
 # =========================================================
 # CONFIG GISTS POR GRUPO
@@ -1140,6 +1143,7 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
 
     meta = parse_heartbeat_metadata(heartbeat_text)
     pack_label = build_pack_rarity_label(detected_cards)
+    has_invalid = any(card is not None and card.rarity == "INVALID" for card in detected_cards)
 
     debug_sheet = create_debug_contact_sheet(source_img, slots, detected_cards)
     out_debug = OUTPUT_DIR / f"gp_debug_{message_id}.png"
@@ -1159,8 +1163,24 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
             "pack_label": pack_label,
             "heartbeat_meta": meta,
             "final_image_path": None,
+            "has_invalid": False,
         }
-
+    if has_invalid:
+        return {
+            "found_count": found_count,
+            "overlay_path": overlay_path,
+            "debug_path": out_debug,
+            "reply_text": "GP inválido detectado. No se generó imagen HD.",
+            "debug_lines": debug_lines,
+            "files": [
+                discord.File(str(overlay_path), filename="box_overlay.png"),
+                discord.File(str(out_debug), filename="gp_debug.png"),
+            ],
+            "pack_label": pack_label,
+            "heartbeat_meta": meta,
+            "final_image_path": None,
+            "has_invalid": True,
+        }
     hd_canvas = build_hd_canvas(detected_cards)
 
     out_hd = OUTPUT_DIR / f"gp_hd_{message_id}.png"
@@ -1186,6 +1206,7 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
         "pack_label": pack_label,
         "heartbeat_meta": meta,
         "final_image_path": out_hd,
+        "has_invalid": has_invalid,
     }
 
 # =========================================================
@@ -1215,6 +1236,32 @@ async def save_vote_state(group: str, data: dict) -> None:
         data
     )
 
+async def update_gp_thread_status(thread_id: int, status: str):
+    try:
+        thread = client.get_channel(thread_id)
+        if thread is None:
+            thread = await client.fetch_channel(thread_id)
+
+        if thread is None:
+            return
+
+        current_name = thread.name
+
+        # quitar iconos previos para no duplicar
+        clean_name = current_name
+        clean_name = clean_name.removeprefix("✅ ").removeprefix("❌ ").strip()
+
+        if status == "alive":
+            new_name = f"✅ {clean_name}"
+        elif status == "dead":
+            new_name = f"❌ {clean_name}"
+        else:
+            return
+
+        await thread.edit(name=new_name[:100])
+
+    except Exception as e:
+        logger.warning("No se pudo renombrar thread %s con status %s: %s", thread_id, status, e)
 
 class GPVoteView(discord.ui.View):
     def __init__(self, vote_key: str, group: str):
@@ -1274,6 +1321,8 @@ class GPVoteView(discord.ui.View):
                 child.label = f"🔴 Dead ({dead_count})"
 
         if status in ("alive", "dead"):
+            await update_gp_thread_status(int(self.vote_key), status)
+
             for child in self.children:
                 child.disabled = True
 
@@ -1336,6 +1385,8 @@ async def on_message(message: discord.Message):
             return
 
         gp_attachment, source_img = gp_result
+        original_gp_image_path = OUTPUT_DIR / f"original_gp_{message.id}_{gp_attachment.filename}"
+        await download_attachment_to_file(gp_attachment, original_gp_image_path)
         logger.info("gp_attachment seleccionado: %s", gp_attachment.filename)
         logger.info("source_img size: %s", source_img.size)
 
@@ -1361,15 +1412,24 @@ async def on_message(message: discord.Message):
         if friend_id:
             await add_vip_id(friend_id, group)
 
-        await register_user_gp(owner_info)
-
-        await update_stats_safe(group, increment_gp_callback)
+        if not result.get("has_invalid", False):
+            await register_user_gp(owner_info)
+            await update_stats_safe(group, increment_gp_callback)
 
         post_data = None
         post_url = None
         post_thread = None
 
-        if result["final_image_path"] is not None:
+        should_create_post = not result.get("has_invalid", False)
+
+        post_image_path = None
+        if should_create_post:
+            if MAINTENANCE_USE_ORIGINAL_IMAGE:
+                post_image_path = original_gp_image_path
+            else:
+                post_image_path = result["final_image_path"]
+
+        if should_create_post and post_image_path is not None:
             post_title = build_post_title(result["heartbeat_meta"], result["pack_label"])
             post_body = build_forum_post_text(result["heartbeat_meta"], result["pack_label"])
 
@@ -1377,7 +1437,7 @@ async def on_message(message: discord.Message):
                 client=client,
                 title=post_title,
                 body_text=post_body,
-                image_path=result["final_image_path"],
+                image_path=post_image_path,
             )
 
         if post_data:
@@ -1421,10 +1481,16 @@ async def on_message(message: discord.Message):
         # 1. RESPUESTA LIMPIA EN CANAL ORIGINAL
         # =========================
         original_files = []
-        if result["final_image_path"] is not None:
-            original_files.append(
-                discord.File(str(result["final_image_path"]), filename="gp_hd.png")
-            )
+
+        if not result.get("has_invalid", False):
+            if MAINTENANCE_USE_ORIGINAL_IMAGE:
+                original_files.append(
+                    discord.File(str(original_gp_image_path), filename="gp_original.png")
+                )
+            elif result["final_image_path"] is not None:
+                original_files.append(
+                    discord.File(str(result["final_image_path"]), filename="gp_hd.png")
+                )
 
         if original_files or view is not None:
             await message.reply(
@@ -1432,6 +1498,8 @@ async def on_message(message: discord.Message):
                 view=view,
                 mention_author=False
             )
+        elif result.get("has_invalid", False):
+            logger.info("GP inválido: no se responde en canal principal, solo log.")
         else:
             await message.reply(
                 "No se pudo generar la imagen HD.",
