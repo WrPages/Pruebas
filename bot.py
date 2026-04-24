@@ -99,7 +99,7 @@ MIN_CONFIDENCE_RATIO = 1.03
 SAVE_DEBUG_SLOTS = False
 # Si está True, NO crea imagen HD.
 # Usa la imagen original del webhook para crear el post.
-MAINTENANCE_USE_ORIGINAL_IMAGE = True
+MAINTENANCE_USE_ORIGINAL_IMAGE = False
 
 # =========================================================
 # CONFIG GISTS POR GRUPO
