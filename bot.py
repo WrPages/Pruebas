@@ -1042,11 +1042,13 @@ def build_forum_info_panel(meta: dict, pack_label: str, online_mentions: List[st
     active_text = " ".join(online_mentions) if online_mentions else "No active users"
 
     return (
-        f"**GP found by {obtainer}**\n"
-        f"**{pack_label}{packs_text}[MegaShine]**\n"
-        f"`{bot_name} ({game_id})`\n"
-        f"`{filename}`\n"
+        "```"
+        f"GP found by {obtainer}\n"
+        f"{pack_label}{packs_text}[MegaShine]\n"
+        f"{bot_name} ({game_id})\n"
+        f"{filename}\n"
         f"Active: {active_text}"
+        "```"
     )
 async def create_forum_post_with_image(
     client: discord.Client,
