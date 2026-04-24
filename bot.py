@@ -406,21 +406,13 @@ def detect_card(slot_bgr: np.ndarray, templates: List[TemplateCard]) -> Tuple[Op
         gap = 999999.0
         ratio = 999999.0
 
-    # 1) Aceptación directa
     if best_score < MAX_SCORE_ACCEPT:
         return best_t, top_debug
 
-    # 2) Aceptación si gana con diferencia
     if best_score < MAX_SCORE_ACCEPT_WITH_GAP and gap > MIN_SCORE_GAP:
         return best_t, top_debug
 
-    # 3) Aceptación por ratio
-    if best_score < 5200 and ratio > MIN_CONFIDENCE_RATIO:
-        return best_t, top_debug
-
-    # 4) Último fallback: si el score no es absurdo, mejor devolver la mejor carta
-    # para evitar "no detectada" cuando sí hay una carta parecida.
-    if best_score < 6500:
+    if best_score < 5200 and ratio > MIN_CONFIDENCE_RATIO and gap > 80:
         return best_t, top_debug
 
     return None, top_debug
