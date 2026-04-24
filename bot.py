@@ -1528,7 +1528,7 @@ async def on_message(message: discord.Message):
             logger.warning("Canal sin grupo configurado: %s", message.channel.id)
             return
 
-        owner_info = await resolve_gp_owner(message.content, group)
+        owner_info = await resolve_gp_owner(client, message.content, group)
         friend_id = extract_friend_id(message.content)
 
         # Enriquecer meta para el post
