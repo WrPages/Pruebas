@@ -787,8 +787,8 @@ async def resolve_gp_owner(content: str, group: str) -> dict:
         user_info = users[owner_discord_id]
         return {
             "discord_id": owner_discord_id,
-            "display_name": user_info.get("name") or username_hint or owner_discord_id,
-            "mention": f"<@{owner_discord_id}>",
+            "display_name": username_hint or owner_discord_id or "unknown",
+            "mention": f"<@{owner_discord_id}>" if owner_discord_id else "@unknown",
         }
 
     # fallback por nombre si no vino mención
