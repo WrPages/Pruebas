@@ -1027,10 +1027,12 @@ def build_post_title(meta: dict, pack_label: str) -> str:
     packs_count = meta.get("packs_count")
     packs_text = f"[{packs_count}P]" if packs_count is not None else "[?P]"
     bot_name = meta.get("bot_name") or "UnknownBot"
-    return f"{pack_label} {packs_text} {bot_name}"
+    game_id = meta.get("game_id") or "UnknownID"
+
+    return f"{pack_label} {packs_text} {bot_name} [{game_id}]"
 
 def build_forum_info_panel(meta: dict, pack_label: str, online_mentions: List[str]) -> str:
-    obtainer = meta.get("owner_mention") or meta.get("owner_display_name") or "@unknown"
+    obtainer = meta.get("owner_display_name") or "unknown"
     bot_name = meta.get("bot_name") or "UnknownBot"
     game_id = meta.get("game_id") or "UnknownID"
     packs_count = meta.get("packs_count")
@@ -1040,11 +1042,11 @@ def build_forum_info_panel(meta: dict, pack_label: str, online_mentions: List[st
     active_text = " ".join(online_mentions) if online_mentions else "No active users"
 
     return (
-        f">>> {obtainer}\n"
-        f"> `{bot_name} ({game_id})`\n"
-        f"> `{pack_label}{packs_text}[MegaShine]`\n"
-        f"> `{filename}`\n\n"
-        f"> {active_text}"
+        f"**GP found by {obtainer}**\n"
+        f"**{pack_label}{packs_text}[MegaShine]**\n"
+        f"`{bot_name} ({game_id})`\n"
+        f"`{filename}`\n"
+        f"Active: {active_text}"
     )
 async def create_forum_post_with_image(
     client: discord.Client,
@@ -1085,20 +1087,21 @@ async def create_forum_post_with_image(
         return None
         
 class ForumLinkView(discord.ui.View):
-    def __init__(self, post_url: str, meta: dict, pack_label: str, status: str = "pending"):
+    def __init__(self, post_url: str, meta: dict, pack_label: str, status: str = "none"):
         super().__init__(timeout=None)
 
         packs = meta.get("packs_count", "?")
         bot = meta.get("bot_name", "Bot")
+        game_id = meta.get("game_id", "ID")
 
         if status == "alive":
-            prefix = "✅ Alive"
+            prefix = "✅"
         elif status == "dead":
-            prefix = "❌ Dead"
+            prefix = "❌"
         else:
-            prefix = "⚪ Pending"
+            prefix = ""
 
-        label = f"{prefix} | {pack_label} [{packs}P] {bot}"
+        label = f"{prefix} {pack_label} [{packs}P] {bot} [{game_id}]".strip()
 
         self.add_item(
             discord.ui.Button(
@@ -1300,6 +1303,33 @@ async def update_gp_thread_status(thread_id: int, status: str):
     except Exception as e:
         logger.warning("No se pudo renombrar thread %s con status %s: %s", thread_id, status, e)
 
+async def update_main_link_button(state: dict, status: str, meta: dict, pack_label: str):
+    try:
+        channel_id = state.get("link_channel_id")
+        message_id = state.get("link_message_id")
+        post_url = state.get("post_url")
+
+        if not channel_id or not message_id or not post_url:
+            return
+
+        channel = client.get_channel(int(channel_id))
+        if channel is None:
+            channel = await client.fetch_channel(int(channel_id))
+
+        msg = await channel.fetch_message(int(message_id))
+
+        new_view = ForumLinkView(
+            post_url,
+            meta,
+            pack_label,
+            status=status
+        )
+
+        await msg.edit(view=new_view)
+
+    except Exception as e:
+        logger.warning("No se pudo actualizar botón link: %s", e)
+        
 class GPVoteView(discord.ui.View):
     def __init__(self, vote_key: str, group: str):
         super().__init__(timeout=None)
@@ -1358,7 +1388,14 @@ class GPVoteView(discord.ui.View):
                 child.label = f"🔴 Dead ({dead_count})"
 
         if status in ("alive", "dead"):
-            await update_gp_thread_status(int(self.vote_key), status)
+    await update_gp_thread_status(int(self.vote_key), status)
+
+    await update_main_link_button(
+        state,
+        status,
+        state.get("meta", {}),
+        state.get("pack_label", "")
+    )
 
             for child in self.children:
                 child.disabled = True
@@ -1507,6 +1544,11 @@ async def on_message(message: discord.Message):
                         "alive_users": [],
                         "dead_users": [],
                         "counted_alive": False,
+                        "link_message_id": None,
+                        "link_channel_id": None,
+                        "post_url": post_url,
+                        "meta": result["heartbeat_meta"],
+                        "pack_label": result["pack_label"],
                     }
 
                 await save_vote_state(group, vote_data)
@@ -1514,7 +1556,7 @@ async def on_message(message: discord.Message):
                 vote_view = GPVoteView(vote_key=vote_key, group=group)
 
                 await post_thread.send(
-                    content=f"{info_panel}\n\n**GP Status:**",
+                    content=info_panel,
                     view=vote_view,
                     allowed_mentions=discord.AllowedMentions(users=True)
                 )
@@ -1522,13 +1564,13 @@ async def on_message(message: discord.Message):
         view = ForumLinkView(
             post_url,
             result["heartbeat_meta"],
-            result["pack_label"],
-            status="pending"
+            result["pack_label"]
         ) if post_url else None
 
         # =========================
         # 1. RESPUESTA LIMPIA EN CANAL ORIGINAL
         # =========================
+        sent_main = None
         original_files = []
 
         if is_valid_gp:
@@ -1542,12 +1584,24 @@ async def on_message(message: discord.Message):
                 )
 
         if original_files or view is not None:
-            await message.channel.send(
+            sent_main = await message.channel.send(
                 files=original_files,
                 view=view
             )
         else:
             logger.info("No se responde en canal principal (GP inválido o incompleto).")
+
+        if post_data and sent_main is not None:
+            post_thread = post_data["thread"]
+            vote_key = str(post_thread.id)
+
+            vote_data = await load_vote_state(group)
+
+            if vote_key in vote_data:
+                vote_data[vote_key]["link_message_id"] = sent_main.id
+                vote_data[vote_key]["link_channel_id"] = sent_main.channel.id
+
+                await save_vote_state(group, vote_data)
 
         # =========================
         # 2. ENVÍO COMPLETO A CANAL DE REGISTRO
