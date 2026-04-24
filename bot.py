@@ -1387,15 +1387,15 @@ class GPVoteView(discord.ui.View):
             elif child.custom_id == "gp_dead":
                 child.label = f"🔴 Dead ({dead_count})"
 
-        if status in ("alive", "dead"):
-    await update_gp_thread_status(int(self.vote_key), status)
+            if status in ("alive", "dead"):
+            await update_gp_thread_status(int(self.vote_key), status)
 
-    await update_main_link_button(
-        state,
-        status,
-        state.get("meta", {}),
-        state.get("pack_label", "")
-    )
+            await update_main_link_button(
+                state,
+                status,
+                state.get("meta", {}),
+                state.get("pack_label", "")
+            )
 
             for child in self.children:
                 child.disabled = True
