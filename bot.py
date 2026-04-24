@@ -1022,29 +1022,46 @@ def build_forum_post_text(meta: dict, pack_label: str) -> str:
         f"```"
     )
 
+
 def build_post_title(meta: dict, pack_label: str) -> str:
     packs_count = meta.get("packs_count")
     packs_text = f"[{packs_count}P]" if packs_count is not None else "[?P]"
     bot_name = meta.get("bot_name") or "UnknownBot"
     return f"{pack_label} {packs_text} {bot_name}"
 
+def build_forum_info_panel(meta: dict, pack_label: str, online_mentions: List[str]) -> str:
+    obtainer = meta.get("owner_mention") or meta.get("owner_display_name") or "@desconocido"
+    bot_name = meta.get("bot_name") or "UnknownBot"
+    game_id = meta.get("game_id") or "UnknownID"
+    packs_count = meta.get("packs_count")
+    packs_text = f"[{packs_count}P]" if packs_count is not None else "[?P]"
+    filename = meta.get("filename") or "unknown_file.xml"
+
+    active_text = " ".join(online_mentions) if online_mentions else "Sin usuarios activos"
+
+    return (
+        f">>> **GP detectado**\n"
+        f"> **Usuario:** {obtainer}\n"
+        f"> **Bot:** `{bot_name}`\n"
+        f"> **ID:** `{game_id}`\n"
+        f"> **Pack:** `{pack_label}{packs_text}[MegaShine]`\n"
+        f"> **Archivo:** `{filename}`\n\n"
+        f"> **Activos:** {active_text}"
+    )
+
 async def create_forum_post_with_image(
     client: discord.Client,
     title: str,
     body_text: str,
     image_path: Path,
-) -> Optional[str]:
+) -> Optional[dict]:
     if not FORUM_CHANNEL_ID:
         logger.warning("FORUM_CHANNEL_ID no configurado")
         return None
 
     channel = client.get_channel(FORUM_CHANNEL_ID)
     if channel is None:
-        try:
-            channel = await client.fetch_channel(FORUM_CHANNEL_ID)
-        except Exception as e:
-            logger.exception("No se pudo obtener el canal foro: %s", e)
-            return None
+        channel = await client.fetch_channel(FORUM_CHANNEL_ID)
 
     if not isinstance(channel, discord.ForumChannel):
         logger.error("FORUM_CHANNEL_ID no corresponde a un ForumChannel")
@@ -1055,11 +1072,12 @@ async def create_forum_post_with_image(
 
         created = await channel.create_thread(
             name=title,
-            content=body_text,
+            content="‎",  # invisible, para que la imagen sea lo principal
             file=file,
         )
 
         thread = created.thread if hasattr(created, "thread") else created
+
         return {
             "thread": thread,
             "jump_url": thread.jump_url
@@ -1068,7 +1086,7 @@ async def create_forum_post_with_image(
     except Exception as e:
         logger.exception("No se pudo crear el post del foro: %s", e)
         return None
-
+        
 class ForumLinkView(discord.ui.View):
     def __init__(self, post_url: str, meta: dict, pack_label: str):
         super().__init__(timeout=None)
@@ -1466,11 +1484,12 @@ async def on_message(message: discord.Message):
 
             if post_thread is not None:
                 online_mentions = await get_online_mentions(group)
-                if online_mentions:
-                    await post_thread.send(
-                        content=" ".join(online_mentions),
-                        allowed_mentions=discord.AllowedMentions(users=True)
-                    )
+
+                info_panel = build_forum_info_panel(
+                    result["heartbeat_meta"],
+                    result["pack_label"],
+                    online_mentions
+                )
 
                 vote_key = str(post_thread.id)
                 vote_data = await load_vote_state(group)
@@ -1489,7 +1508,12 @@ async def on_message(message: discord.Message):
                 await save_vote_state(group, vote_data)
 
                 vote_view = GPVoteView(vote_key=vote_key, group=group)
-                await post_thread.send("Estado del GP:", view=vote_view)
+
+                await post_thread.send(
+                    content=f"{info_panel}\n\n**Estado del GP:**",
+                    view=vote_view,
+                    allowed_mentions=discord.AllowedMentions(users=True)
+                )
 
         view = ForumLinkView(
             post_url,
@@ -1513,10 +1537,9 @@ async def on_message(message: discord.Message):
                 )
 
         if original_files or view is not None:
-            await message.reply(
+            await message.channel.send(
                 files=original_files,
-                view=view,
-                mention_author=False
+                view=view
             )
         else:
             logger.info("No se responde en canal principal (GP inválido o incompleto).")
