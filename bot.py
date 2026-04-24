@@ -109,14 +109,14 @@ CHANNEL_GROUP_MAP = {
    # 1486277594629275770: "Elite_Four",
    # 1487362022864588902: "Trainer",
    # 1491238471556403281: "Gym_Leader",
-    1497011696521183473: "Elite_Four",
-    1497011508503122031: "Trainer",
+    1497179630027800728: "Elite_Four",
+    1497179450960379915: "Trainer",
     1497011617580318912: "Gym_Leader",
 }
 
 GROUP_CONFIG = {
     "Trainer": {
-        "FORUM_CHANNEL_ID": 1496449812072108133,
+        "FORUM_CHANNEL_ID": 1497177430828384396,
         "users_gist_id": "1c066922bc39ac136b6f234fad6d9420",
         "users_filename": "trainer_users.json",
         "online_gist_id": "4edcf4d341cd4f7d5d0fb8a50f8b8c3c",
@@ -142,7 +142,7 @@ GROUP_CONFIG = {
         "vote_file": "gym_gp_votes.json",
     },
     "Elite_Four": {
-        "FORUM_CHANNEL_ID": 1496449812072108133,
+        "FORUM_CHANNEL_ID": 1497179653276827720,
         "users_gist_id": "bb18eda2ea748723d8fe0131dd740b70",
         "users_filename": "elite_users.json",
         "online_gist_id": "d9db3a72fed74c496fd6cc830f9ca6e9",
