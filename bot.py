@@ -116,6 +116,18 @@ CHANNEL_GROUP_MAP = {
 
 GROUP_CONFIG = {
     "Trainer": {
+        "FORUM_CHANNEL_ID": 1496449812072108133,
+    },
+    "Gym_Leader": {
+        "FORUM_CHANNEL_ID": 1496449812072108133,
+    },
+    "Elite_Four": {
+        "FORUM_CHANNEL_ID": 1496449812072108133,
+    }
+}
+
+GROUP_CONFIG = {
+    "Trainer": {
         "users_gist_id": "1c066922bc39ac136b6f234fad6d9420",
         "users_filename": "trainer_users.json",
         "online_gist_id": "4edcf4d341cd4f7d5d0fb8a50f8b8c3c",
@@ -1004,14 +1016,15 @@ def build_final_poster(
     draw.text((x, y), footer_text, fill=(235, 235, 235), font=font)
     return final_img
 
-def build_forum_post_text(meta: dict, pack_label: str) -> str:
-    obtainer = meta.get("owner_mention") or meta.get("owner_display_name") or "@desconocido"
-    #obtainer = meta.get("owner_display_name") or meta.get("owner_mention") or "@desconocido"
+def build_forum_post_text(meta: dict, pack_label: str, online_mentions: List[str]) -> str:
+    obtainer = meta.get("owner_display_name") or "unknown"
     bot_name = meta.get("bot_name") or "UnknownBot"
     game_id = meta.get("game_id") or "UnknownID"
     packs_count = meta.get("packs_count")
     packs_text = f"[{packs_count}P]" if packs_count is not None else "[?P]"
     filename = meta.get("filename") or "unknown_file.xml"
+
+    active_text = " ".join(online_mentions) if online_mentions else "No active users"
 
     return (
         "```"
@@ -1019,7 +1032,7 @@ def build_forum_post_text(meta: dict, pack_label: str) -> str:
         f"{pack_label}{packs_text}[MegaShine]\n"
         f"{bot_name} ({game_id})\n"
         f"{filename}\n"
-        f"Active: {active_text}"
+        f"{active_text}"
         "```"
     )
 
@@ -1053,37 +1066,34 @@ def build_forum_info_panel(meta: dict, pack_label: str, online_mentions: List[st
     )
 async def create_forum_post_with_image(
     client: discord.Client,
+    group: str,
     title: str,
-    body_text: str,
     image_path: Path,
 ) -> Optional[dict]:
-    if not FORUM_CHANNEL_ID:
-        logger.warning("FORUM_CHANNEL_ID no configurado")
-        return None
 
-    channel = client.get_channel(FORUM_CHANNEL_ID)
+    forum_id = GROUP_CONFIG[group]["FORUM_CHANNEL_ID"]
+
+    channel = client.get_channel(forum_id)
     if channel is None:
-        channel = await client.fetch_channel(FORUM_CHANNEL_ID)
+        channel = await client.fetch_channel(forum_id)
 
     if not isinstance(channel, discord.ForumChannel):
-        logger.error("FORUM_CHANNEL_ID no corresponde a un ForumChannel")
         return None
 
-    try:
-        file = discord.File(str(image_path), filename=image_path.name)
+    file = discord.File(str(image_path), filename=image_path.name)
 
-        created = await channel.create_thread(
-            name=title,
-            content="‎",  # invisible, para que la imagen sea lo principal
-            file=file,
-        )
+    created = await channel.create_thread(
+        name=title,
+        content="‎",
+        file=file,
+    )
 
-        thread = created.thread if hasattr(created, "thread") else created
+    thread = created.thread if hasattr(created, "thread") else created
 
-        return {
-            "thread": thread,
-            "jump_url": thread.jump_url
-        }
+    return {
+        "thread": thread,
+        "jump_url": thread.jump_url
+    }
 
     except Exception as e:
         logger.exception("No se pudo crear el post del foro: %s", e)
@@ -1514,13 +1524,19 @@ async def on_message(message: discord.Message):
 
         if should_create_post and post_image_path is not None:
             post_title = build_post_title(result["heartbeat_meta"], result["pack_label"])
-            post_body = build_forum_post_text(result["heartbeat_meta"], result["pack_label"])
+            online_mentions = await get_online_mentions(group)
+
+            post_body = build_forum_post_text(
+                result["heartbeat_meta"],
+                result["pack_label"],
+                online_mentions
+            )            
 
             post_data = await create_forum_post_with_image(
-                client=client,
-                title=post_title,
-                body_text=post_body,
-                image_path=post_image_path,
+                client,
+                group,
+                post_title,
+                post_image_path
             )
 
         if post_data:
