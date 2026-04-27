@@ -104,7 +104,11 @@ MAINTENANCE_USE_ORIGINAL_IMAGE = False
 # =========================================================
 # CONFIG GISTS POR GRUPO
 # =========================================================
-
+MIN_TWO_STAR_BY_GROUP = {
+    "Trainer": 2,
+    "Gym_Leader": 2,
+    "Elite_Four": 3,
+}
 CHANNEL_GROUP_MAP = {
    # 1486277594629275770: "Elite_Four",
    # 1487362022864588902: "Trainer",
@@ -1236,6 +1240,10 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
     meta = parse_heartbeat_metadata(heartbeat_text)
     pack_label = build_pack_rarity_label(detected_cards)
     has_invalid = any(card is not None and card.rarity == "INVALID" for card in detected_cards)
+    two_star_count = sum(
+        1 for card in detected_cards
+        if card is not None and card.rarity == "2★"
+    )
 
     debug_sheet = create_debug_contact_sheet(source_img, slots, detected_cards)
     out_debug = OUTPUT_DIR / f"gp_debug_{message_id}.png"
@@ -1243,6 +1251,7 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
 
     if found_count == 0:
         return {
+            "two_star_count": two_star_count,
             "found_count": found_count,
             "overlay_path": overlay_path,
             "debug_path": out_debug,
@@ -1259,6 +1268,7 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
         }
     if has_invalid:
         return {
+            "two_star_count": two_star_count,
             "found_count": found_count,
             "overlay_path": overlay_path,
             "debug_path": out_debug,
@@ -1273,6 +1283,7 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
             "final_image_path": None,
             "has_invalid": True,
         }
+
     hd_canvas = build_hd_canvas(detected_cards)
 
     out_hd = OUTPUT_DIR / f"gp_hd_{message_id}.png"
@@ -1285,6 +1296,7 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
     reply_text += "```" + "\n".join(debug_lines[:20])[:1800] + "```"
 
     return {
+        "two_star_count": two_star_count,
         "found_count": found_count,
         "overlay_path": overlay_path,
         "debug_path": out_debug,
@@ -1536,9 +1548,12 @@ async def on_message(message: discord.Message):
         result["heartbeat_meta"]["owner_display_name"] = owner_info.get("display_name")
         result["heartbeat_meta"]["owner_mention"] = owner_info.get("mention")
 
+        min_two_star = MIN_TWO_STAR_BY_GROUP.get(group, 0)
+
         is_valid_gp = (
             not result.get("has_invalid", False)
             and result.get("found_count", 0) == 5
+            and result.get("two_star_count", 0) >= min_two_star
         )
 
         if is_valid_gp:
