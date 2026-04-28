@@ -86,7 +86,7 @@ DRAW_SLOTS = [
 
 TRIGGER_PATTERNS = [
     re.compile(r"god\s*pack", re.IGNORECASE),
-    re.compile(r"megashine", re.IGNORECASE),
+    re.compile(r"Pulsing Aura", re.IGNORECASE),
     re.compile(r"\[1/5\]\[p\]", re.IGNORECASE),
 ]
 
@@ -717,7 +717,7 @@ def parse_heartbeat_metadata(content: str) -> dict:
             result["game_id"] = m.group(2).strip()
             continue
 
-        m = re.search(r"(\[\d/5\]\[(\d+)P\]\[MegaShine\])", line, re.IGNORECASE)
+        m = re.search(r"(\[\d/5\]\[(\d+)P\]\[Pulsing Aura\])", line, re.IGNORECASE)
         if m:
             result["raw_pack_line"] = m.group(1)
             result["packs_count"] = int(m.group(2))
@@ -1068,7 +1068,7 @@ def build_forum_post_text(meta: dict, pack_label: str, online_mentions: List[str
     return (
         "```"
         f"GP found by {obtainer}\n"
-        f"{pack_label}{packs_text}[MegaShine]\n"
+        f"{pack_label}{packs_text}[Pulsing Aura]\n"
         f"{bot_name} ({game_id})\n"
         f"{filename}\n"
         f"{active_text}"
@@ -1097,7 +1097,7 @@ def build_forum_info_panel(meta: dict, pack_label: str, online_mentions: List[st
     return (
         "```"
         f"GP found by {obtainer}\n"
-        f"{pack_label}{packs_text}[MegaShine]\n"
+        f"{pack_label}{packs_text}[Pulsing Aura]\n"
         f"{bot_name} ({game_id})\n"
         f"{filename}"
         "```\n"
@@ -1183,7 +1183,7 @@ def build_log_summary(meta: dict, pack_label: str, debug_lines: List[str]) -> st
         f"```"
         f"{obtainer}\n"
         f"{bot_name} ({game_id})\n"
-        f"{pack_label}{packs_text}[MegaShine]\n"
+        f"{pack_label}{packs_text}[Pulsing Aura]\n"
         f"{filename}\n\n"
         + "\n".join(slot_lines) +
         f"```"
