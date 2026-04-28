@@ -1104,11 +1104,14 @@ def build_forum_info_panel(meta: dict, pack_label: str, online_mentions: List[st
         f"{active_text}"
         
     )
+
+
 async def create_forum_post_with_image(
     client: discord.Client,
     group: str,
     title: str,
     image_path: Path,
+    content: str = "‎",
 ) -> Optional[dict]:
 
     try:
@@ -1125,7 +1128,7 @@ async def create_forum_post_with_image(
 
         created = await channel.create_thread(
             name=title,
-            content="‎",
+            content=content,
             file=file,
         )
 
@@ -1566,7 +1569,7 @@ async def on_message(message: discord.Message):
         post_url = None
         post_thread = None
 
-        should_create_post = is_valid_gp
+        should_create_post = is_valid_gp or MAINTENANCE_USE_ORIGINAL_IMAGE
 
         post_image_path = None
         if should_create_post:
@@ -1589,7 +1592,8 @@ async def on_message(message: discord.Message):
                 client,
                 group,
                 post_title,
-                post_image_path
+                post_image_path,
+                post_body
             )
 
         if post_data:
@@ -1646,7 +1650,9 @@ async def on_message(message: discord.Message):
         sent_main = None
         original_files = []
 
-        if is_valid_gp:
+
+
+        if is_valid_gp or MAINTENANCE_USE_ORIGINAL_IMAGE:
             if MAINTENANCE_USE_ORIGINAL_IMAGE:
                 original_files.append(
                     discord.File(str(original_gp_image_path), filename="gp_original.png")
@@ -1655,6 +1661,7 @@ async def on_message(message: discord.Message):
                 original_files.append(
                     discord.File(str(result["final_image_path"]), filename="gp_hd.png")
                 )
+        
 
         if original_files or view is not None:
             sent_main = await message.channel.send(
