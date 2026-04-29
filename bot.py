@@ -106,7 +106,7 @@ MAINTENANCE_USE_ORIGINAL_IMAGE = False
 MIN_TWO_STAR_BY_GROUP = {
     "Trainer": 2,
     "Gym_Leader": 1,
-    "Elite_Four": 3,
+    "Elite_Four": 2,
 }
 CHANNEL_GROUP_MAP = {
    # 1486277594629275770: "Elite_Four",
