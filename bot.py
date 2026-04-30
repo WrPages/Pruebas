@@ -1583,9 +1583,11 @@ async def on_message(message: discord.Message):
             online_mentions = await get_online_mentions(group)
 
             post_body = build_forum_post_text(
-                #result["heartbeat_meta"],
-                #result["pack_label"]
-               # online_mentions
+                client,
+                group,
+                post_title,
+                post_image_path,
+                content="‎"
             )            
 
             post_data = await create_forum_post_with_image(
