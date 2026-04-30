@@ -1584,7 +1584,7 @@ async def on_message(message: discord.Message):
 
             post_body = build_forum_post_text(
                 #result["heartbeat_meta"],
-                result["pack_label"]
+                #result["pack_label"]
                # online_mentions
             )            
 
