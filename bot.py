@@ -1565,6 +1565,25 @@ async def on_message(message: discord.Message):
             await register_user_gp(owner_info)
             await update_stats_safe(group, increment_gp_callback)
 
+        if is_valid_gp:
+            if friend_id:
+                try:
+                    await add_vip_id(friend_id, group)
+                except Exception as e:
+                    logger.exception("No se pudo agregar VIP, pero el GP seguirá procesando: %s", e)
+
+            try:
+                await register_user_gp(owner_info)
+            except Exception as e:
+        logger.exception("No se pudo guardar GP del usuario, pero el GP seguirá procesando: %s", e)
+
+            try:
+                await update_stats_safe(group, increment_gp_callback)
+            except Exception as e:
+                logger.exception("No se pudieron actualizar stats live, pero el GP seguirá procesando: %s", e)
+
+        
+
         post_data = None
         post_url = None
         post_thread = None
