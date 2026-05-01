@@ -1558,12 +1558,6 @@ async def on_message(message: discord.Message):
             and result.get("two_star_count", 0) >= min_two_star
         )
 
-        if is_valid_gp:
-            if friend_id:
-                await add_vip_id(friend_id, group)
-
-            await register_user_gp(owner_info)
-            await update_stats_safe(group, increment_gp_callback)
 
         if is_valid_gp:
             if friend_id:
