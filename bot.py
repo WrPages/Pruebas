@@ -1608,13 +1608,20 @@ async def on_message(message: discord.Message):
                 content="‎"
             )
 
+
+
         if post_data:
             post_thread = post_data["thread"]
             post_url = post_data["jump_url"]
 
             if post_thread is not None:
-                online_mentions = await get_online_mentions(group)
+                online_mentions = []
 
+                try:
+                    online_mentions = await get_online_mentions(group)
+                except Exception as e:
+                    logger.exception("Failed to load online mentions, continuing GP flow: %s", e)
+        
                 info_panel = build_forum_info_panel(
                     result["heartbeat_meta"],
                     result["pack_label"],
@@ -1622,33 +1629,44 @@ async def on_message(message: discord.Message):
                 )
 
                 vote_key = str(post_thread.id)
-                vote_data = await load_vote_state(group)
-
-                if vote_key not in vote_data:
-                    vote_data[vote_key] = {
-                        "group": group,
-                        "owner_discord_id": owner_info.get("discord_id"),
-                        "friend_id": friend_id,
-                        "status": "none",
-                        "alive_users": [],
-                        "dead_users": [],
-                        "counted_alive": False,
-                        "link_message_id": None,
-                        "link_channel_id": None,
-                        "post_url": post_url,
-                        "meta": result["heartbeat_meta"],
-                        "pack_label": result["pack_label"],
-                    }
-
-                await save_vote_state(group, vote_data)
-
                 vote_view = GPVoteView(vote_key=vote_key, group=group)
 
-                await post_thread.send(
-                    content=info_panel,
-                    view=vote_view,
-                    allowed_mentions=discord.AllowedMentions(users=True)
-                )
+                try:
+                    await post_thread.send(
+                        content=info_panel,
+                        view=vote_view,
+                        allowed_mentions=discord.AllowedMentions(users=True)
+                    )
+                except Exception as e:
+                    logger.exception("Failed to send forum info panel, continuing GP flow: %s", e)
+
+                try:
+                    vote_data = await load_vote_state(group)
+
+                    if vote_key not in vote_data:
+                        vote_data[vote_key] = {
+                            "group": group,
+                            "owner_discord_id": owner_info.get("discord_id"),
+                            "friend_id": friend_id,
+                            "status": "none",
+                            "alive_users": [],
+                            "dead_users": [],
+                            "counted_alive": False,
+                            "link_message_id": None,
+                            "link_channel_id": None,
+                            "post_url": post_url,
+                            "meta": result["heartbeat_meta"],
+                            "pack_label": result["pack_label"],
+                        }
+
+                    await save_vote_state(group, vote_data)
+
+                except Exception as e:
+                    logger.exception("Failed to save vote state, continuing GP flow: %s", e)
+
+
+
+        
 
         view = ForumLinkView(
             post_url,
@@ -1683,17 +1701,22 @@ async def on_message(message: discord.Message):
         else:
             logger.info("No se responde en canal principal (GP inválido o incompleto).")
 
+
         if post_data and sent_main is not None:
-            post_thread = post_data["thread"]
-            vote_key = str(post_thread.id)
+            try:
+                post_thread = post_data["thread"]
+                vote_key = str(post_thread.id)
 
-            vote_data = await load_vote_state(group)
+                vote_data = await load_vote_state(group)
 
-            if vote_key in vote_data:
-                vote_data[vote_key]["link_message_id"] = sent_main.id
-                vote_data[vote_key]["link_channel_id"] = sent_main.channel.id
+                if vote_key in vote_data:
+                    vote_data[vote_key]["link_message_id"] = sent_main.id
+                    vote_data[vote_key]["link_channel_id"] = sent_main.channel.id
 
-                await save_vote_state(group, vote_data)
+                    await save_vote_state(group, vote_data)
+
+            except Exception as e:
+                logger.exception("Failed to save main link data, continuing GP flow: %s", e)
 
         # =========================
         # 2. ENVÍO COMPLETO A CANAL DE REGISTRO
