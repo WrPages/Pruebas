@@ -1525,7 +1525,7 @@ async def on_message(message: discord.Message):
             return
 
         owner_info = await resolve_gp_owner(client, message.content, group)
-        friend_id = extract_friend_id(message.content)
+        friend_id = result["heartbeat_meta"].get("game_id") or extract_friend_id(message.content)
         logger.info("Extracted VIP friend_id=%s from message_id=%s", friend_id, message.id)
 
         # Enriquecer meta para el post
