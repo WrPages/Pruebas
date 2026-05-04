@@ -1623,9 +1623,9 @@ async def on_message(message: discord.Message):
                 try:
                     online_mentions = await get_online_mentions(group)
                 except Exception as e:
-                    logger.exception("Failed to load online mentions, continuing GP flow: %s", e)
-        
-               info_panel = build_forum_info_panel(
+                    logger.exception("Failed to load online mentions: %s", e)
+
+                info_panel = build_forum_info_panel(
                     result["heartbeat_meta"],
                     result["pack_label"],
                     online_mentions
@@ -1657,7 +1657,26 @@ async def on_message(message: discord.Message):
                     vote_data_saved = True
 
                 except Exception as e:
-                    logger.exception("Failed to save vote state before creating buttons: %s", e)
+                    logger.exception("Failed to save vote state: %s", e)
+
+                if vote_data_saved:
+                    vote_view = GPVoteView(vote_key=vote_key, group=group)
+
+                    try:
+                        await post_thread.send(
+                            content=info_panel,
+                            view=vote_view,
+                            allowed_mentions=discord.AllowedMentions(users=True)
+                        )
+                    except Exception as e:
+                        logger.exception("Failed to send forum info panel with buttons: %s", e)
+                else:
+                    try:
+                        await post_thread.send(
+                            content=info_panel + "\n\nVoting disabled (state not saved)."
+                        )
+                    except Exception as e:
+                        logger.exception("Failed to send forum info panel without buttons: %s", e)
 ###########
         view = ForumLinkView(
             post_url,
@@ -1712,7 +1731,7 @@ async def on_message(message: discord.Message):
         # =========================
         # 2. ENVÍO COMPLETO A CANAL DE REGISTRO
         # =========================
-        if LOG_CHANNEL_ID:
+        if LOG_CHANNEL_ID and not is_valid_gp:
             log_channel = client.get_channel(LOG_CHANNEL_ID)
             if log_channel is None:
                 try:
