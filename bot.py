@@ -86,8 +86,7 @@ DRAW_SLOTS = [
 
 TRIGGER_PATTERNS = [
     re.compile(r"god\s*pack", re.IGNORECASE),
-    re.compile(r"PulsingAura", re.IGNORECASE),
-    re.compile(r"\[1/5\]\[p\]", re.IGNORECASE),
+    re.compile(r"\[\d/5\]\[\d+P\]\[[^\]]+\]", re.IGNORECASE),
 ]
 
 VALID_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
@@ -706,6 +705,8 @@ def parse_heartbeat_metadata(content: str) -> dict:
         "bot_name": None,
         "game_id": None,
         "packs_count": None,
+        "pack_position": None,
+        "pack_name": None,
         "filename": None,
         "raw_pack_line": None,
     }
@@ -717,10 +718,12 @@ def parse_heartbeat_metadata(content: str) -> dict:
             result["game_id"] = m.group(2).strip()
             continue
 
-        m = re.search(r"(\[\d/5\]\[(\d+)P\]\[PulsingAura\])", line, re.IGNORECASE)
+        m = re.search(r"(\[(\d)/5\]\[(\d+)P\]\[([^\]]+)\])", line, re.IGNORECASE)
         if m:
             result["raw_pack_line"] = m.group(1)
-            result["packs_count"] = int(m.group(2))
+            result["pack_position"] = int(m.group(2))
+            result["packs_count"] = int(m.group(3))
+            result["pack_name"] = m.group(4).strip()
             continue
 
         m = re.match(r"^File name:\s*(.+)$", line, re.IGNORECASE)
@@ -1068,7 +1071,7 @@ def build_forum_post_text(meta: dict, pack_label: str, online_mentions: List[str
     return (
         "```"
         f"GP found by {obtainer}\n"
-        f"{pack_label}{packs_text}[PulsingAura]\n"
+        f"{pack_label}{packs_text}[{meta.get('pack_name') or 'UnknownPack'}]\n"
         f"{bot_name} ({game_id})\n"
         f"{filename}\n"
         f"{active_text}"
@@ -1097,7 +1100,7 @@ def build_forum_info_panel(meta: dict, pack_label: str, online_mentions: List[st
     return (
         "```"
         f"GP found by {obtainer}\n"
-        f"{pack_label}{packs_text}[PulsingAura]\n"
+        f"{pack_label}{packs_text}[{meta.get('pack_name') or 'UnknownPack'}]\n"
         f"{bot_name} ({game_id})\n"
         f"{filename}"
         "```\n"
@@ -1186,7 +1189,7 @@ def build_log_summary(meta: dict, pack_label: str, debug_lines: List[str]) -> st
         f"```"
         f"{obtainer}\n"
         f"{bot_name} ({game_id})\n"
-        f"{pack_label}{packs_text}[PulsingAura]\n"
+        f"{pack_label}{packs_text}[{meta.get('pack_name') or 'UnknownPack'}]\n"
         f"{filename}\n\n"
         + "\n".join(slot_lines) +
         f"```"
@@ -1594,11 +1597,11 @@ async def on_message(message: discord.Message):
             post_title = build_post_title(result["heartbeat_meta"], result["pack_label"])
             online_mentions = await get_online_mentions(group)
 
-            post_body = build_forum_post_text(
-                result["heartbeat_meta"],
-                result["pack_label"],
-                online_mentions
-            )     
+          #  post_body = build_forum_post_text(
+           #     result["heartbeat_meta"],
+            #    result["pack_label"],
+             #   online_mentions
+            #)     
 
             post_data = await create_forum_post_with_image(
                 client,
@@ -1628,17 +1631,9 @@ async def on_message(message: discord.Message):
                     online_mentions
                 )
 
-                vote_key = str(post_thread.id)
-                vote_view = GPVoteView(vote_key=vote_key, group=group)
-
-                try:
-                    await post_thread.send(
-                        content=info_panel,
-                        view=vote_view,
-                        allowed_mentions=discord.AllowedMentions(users=True)
-                    )
-                except Exception as e:
-                    logger.exception("Failed to send forum info panel, continuing GP flow: %s", e)
+########3
+                  vote_key = str(post_thread.id)
+                  vote_data_saved = False
 
                 try:
                     vote_data = await load_vote_state(group)
@@ -1660,14 +1655,30 @@ async def on_message(message: discord.Message):
                         }
 
                     await save_vote_state(group, vote_data)
-
-                except Exception as e:
-                    logger.exception("Failed to save vote state, continuing GP flow: %s", e)
-
-
-
+                    vote_data_saved = True
         
+                except Exception as e:
+                    logger.exception("Failed to save vote state before creating buttons: %s", e)
+    
+                if vote_data_saved:
+                    vote_view = GPVoteView(vote_key=vote_key, group=group)
 
+                    try:
+                        await post_thread.send(
+                            content=info_panel,
+                            view=vote_view,
+                            allowed_mentions=discord.AllowedMentions(users=True)
+                        )
+                    except Exception as e:
+                        logger.exception("Failed to send forum info panel with buttons: %s", e)
+                else:
+                    try:
+                        await post_thread.send(
+                            content=info_panel + "\n\nVoting buttons were not created because vote state could not be saved."
+                        )
+                    except Exception as e:
+                        logger.exception("Failed to send forum info panel without buttons: %s", e)  
+###########
         view = ForumLinkView(
             post_url,
             result["heartbeat_meta"],
