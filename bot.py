@@ -736,9 +736,16 @@ def extract_first_line_username_hint(content: str) -> Optional[str]:
 
 
 def extract_friend_id(content: str) -> Optional[str]:
-    m = re.search(r"\b(\d{16})\b", content)
-    if m:
-        return m.group(1)
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+
+    for line in lines:
+        if "God Pack found" in line:
+            break
+
+        m = re.match(r"^.+?\s*\((\d{16})\)$", line)
+        if m:
+            return m.group(1)
+
     return None
     
 async def load_group_users(group: str) -> dict:
