@@ -1625,7 +1625,7 @@ async def on_message(message: discord.Message):
                 except Exception as e:
                     logger.exception("Failed to load online mentions, continuing GP flow: %s", e)
         
-                       info_panel = build_forum_info_panel(
+               info_panel = build_forum_info_panel(
                     result["heartbeat_meta"],
                     result["pack_label"],
                     online_mentions
