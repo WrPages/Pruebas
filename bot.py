@@ -714,7 +714,7 @@ def parse_heartbeat_metadata(content: str) -> dict:
             result["game_id"] = m.group(2).strip()
             continue
 
-        m = re.search(r"(\[(\d)/5\]\[(\d+)P\]\[([^\]]+)\])", line, re.IGNORECASE)
+        m = re.search(r"(\[(\d)/5\]\[(\d+)P\]\[([^\]]*)\])", line, re.IGNORECASE)
         if m:
             result["raw_pack_line"] = m.group(1)
             result["pack_position"] = int(m.group(2))
