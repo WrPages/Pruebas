@@ -1700,7 +1700,7 @@ async def on_message(message: discord.Message):
         # =========================
         # 2. ENVÍO COMPLETO A CANAL DE REGISTRO
         # =========================
-       if LOG_CHANNEL_ID:
+        if LOG_CHANNEL_ID:
             log_channel = client.get_channel(LOG_CHANNEL_ID)
             if log_channel is None:
                 try:
