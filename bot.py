@@ -1452,7 +1452,22 @@ class GPVoteView(discord.ui.View):
             for child in self.children:
                 child.disabled = True
 
-        await interaction.response.edit_message(view=self)
+        voter_name = interaction.user.display_name
+
+        if vote_type == "alive":
+            vote_text = f"{voter_name} voted Alive."
+        else:
+            vote_text = f"{voter_name} voted Dead."
+
+        await interaction.response.send_message(
+            vote_text,
+            ephemeral=False
+        )
+
+        try:
+            await interaction.message.edit(view=self)
+        except Exception as e:
+            logger.warning("Failed to update vote buttons after vote: %s", e)
 
     async def _increment_alive(self, stats: dict) -> dict:
         stats["totalAlive"] += 1
