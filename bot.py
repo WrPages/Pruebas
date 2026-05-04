@@ -544,54 +544,23 @@ async def download_pil_image(attachment: discord.Attachment) -> Image.Image:
     return Image.open(io.BytesIO(data)).convert("RGBA")
 
 async def get_best_gp_image_attachment(message: discord.Message) -> Optional[Tuple[discord.Attachment, Image.Image]]:
-    image_attachments = [att for att in message.attachments if attachment_looks_like_gp_grid(att)]
+    image_attachments = [
+        att for att in message.attachments
+        if attachment_looks_like_gp_grid(att)
+    ]
 
     if not image_attachments:
         return None
 
-    preferred_keywords = ["screenshot", "screen", "pack", "packs", "godpack", "gp"]
+    first_att = image_attachments[0]
 
-    best_att = None
-    best_img = None
-    best_score = None
-
-    for att in image_attachments:
-        name = att.filename.lower()
-        if any(k in name for k in preferred_keywords):
-            try:
-                img = await download_pil_image(att)
-                logger.info("Attachment elegido por nombre: %s", att.filename)
-                return att, img
-            except Exception as e:
-                logger.warning("Error cargando attachment %s: %s", att.filename, e)
-
-    for att in image_attachments:
-        try:
-            img = await download_pil_image(att)
-            w, h = img.size
-            aspect = w / h if h else 1.0
-
-            penalty = 0
-            if aspect < 0.7:
-                penalty += 1000
-
-            score = abs(w - 240) + abs(h - 227) + abs(aspect - (240 / 227)) * 100 + penalty
-
-            logger.info("Attachment candidato: %s size=%sx%s score=%s", att.filename, w, h, score)
-
-            if best_score is None or score < best_score:
-                best_score = score
-                best_att = att
-                best_img = img
-
-        except Exception as e:
-            logger.warning("Error analizando attachment %s: %s", att.filename, e)
-
-    if best_att is not None and best_img is not None:
-        logger.info("Attachment elegido por tamaño: %s", best_att.filename)
-        return best_att, best_img
-
-    return None
+    try:
+        img = await download_pil_image(first_att)
+        logger.info("Selected first image attachment for GP detection: %s", first_att.filename)
+        return first_att, img
+    except Exception as e:
+        logger.warning("Failed to load first image attachment %s: %s", first_att.filename, e)
+        return None
 
 async def download_attachment_to_file(att: discord.Attachment, save_path: Path) -> Optional[Path]:
     try:
