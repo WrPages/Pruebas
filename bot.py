@@ -604,11 +604,22 @@ async def github_patch_gist_file(gist_id: str, filename: str, content: str) -> N
         }
     }
 
-    async with aiohttp.ClientSession() as session:
-        async with session.patch(url, headers=headers, json=payload) as resp:
-            if resp.status not in (200, 201):
+    for attempt in range(3):
+        async with aiohttp.ClientSession() as session:
+            async with session.patch(url, headers=headers, json=payload) as resp:
+                if resp.status in (200, 201):
+                    return
+
                 text = await resp.text()
+
+                if resp.status == 403:
+                    logger.warning("Rate limit hit. Waiting before retry... (%s)", attempt)
+                    await asyncio.sleep(10 + attempt * 5)
+                    continue
+
                 raise RuntimeError(f"PATCH gist failed {resp.status}: {text}")
+
+    logger.error("Failed after retries (rate limit). Skipping save.")
 
 
 async def gist_load_json(gist_id: str, filename: str, default):
