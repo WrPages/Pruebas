@@ -742,7 +742,10 @@ def extract_friend_id(content: str) -> Optional[str]:
         if "God Pack found" in line:
             break
 
-        m = re.match(r"^.+?\s*\((\d{16})\)$", line)
+        if line.startswith("<@"):
+            continue
+
+        m = re.search(r"\((\d{16})\)", line)
         if m:
             return m.group(1)
 
@@ -1523,6 +1526,7 @@ async def on_message(message: discord.Message):
 
         owner_info = await resolve_gp_owner(client, message.content, group)
         friend_id = extract_friend_id(message.content)
+        logger.info("Extracted VIP friend_id=%s from message_id=%s", friend_id, message.id)
 
         # Enriquecer meta para el post
         result["heartbeat_meta"]["owner_discord_id"] = owner_info.get("discord_id")
@@ -1539,6 +1543,7 @@ async def on_message(message: discord.Message):
 
 
         if is_valid_gp:
+            logger.info("Valid GP confirmed. Trying to add VIP ID: %s | group=%s", friend_id, group)
             if friend_id:
                 try:
                     await add_vip_id(friend_id, group)
