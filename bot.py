@@ -1625,15 +1625,14 @@ async def on_message(message: discord.Message):
                 except Exception as e:
                     logger.exception("Failed to load online mentions, continuing GP flow: %s", e)
         
-                info_panel = build_forum_info_panel(
+                       info_panel = build_forum_info_panel(
                     result["heartbeat_meta"],
                     result["pack_label"],
                     online_mentions
                 )
 
-########3
-                  vote_key = str(post_thread.id)
-                  vote_data_saved = False
+                vote_key = str(post_thread.id)
+                vote_data_saved = False
 
                 try:
                     vote_data = await load_vote_state(group)
@@ -1656,28 +1655,9 @@ async def on_message(message: discord.Message):
 
                     await save_vote_state(group, vote_data)
                     vote_data_saved = True
-        
+
                 except Exception as e:
                     logger.exception("Failed to save vote state before creating buttons: %s", e)
-    
-                if vote_data_saved:
-                    vote_view = GPVoteView(vote_key=vote_key, group=group)
-
-                    try:
-                        await post_thread.send(
-                            content=info_panel,
-                            view=vote_view,
-                            allowed_mentions=discord.AllowedMentions(users=True)
-                        )
-                    except Exception as e:
-                        logger.exception("Failed to send forum info panel with buttons: %s", e)
-                else:
-                    try:
-                        await post_thread.send(
-                            content=info_panel + "\n\nVoting buttons were not created because vote state could not be saved."
-                        )
-                    except Exception as e:
-                        logger.exception("Failed to send forum info panel without buttons: %s", e)  
 ###########
         view = ForumLinkView(
             post_url,
