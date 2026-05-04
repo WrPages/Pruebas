@@ -9,6 +9,7 @@ import json
 from collections import defaultdict
 import aiohttp
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 import cv2
 import numpy as np
@@ -23,9 +24,8 @@ DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "")
 CLIENT_ID = int(os.environ.get("CLIENT_ID", "0"))
 FORUM_CHANNEL_ID = int(os.environ.get("FORUM_CHANNEL_ID", "0"))
 LOG_CHANNEL_ID = int(os.environ.get("LOG_CHANNEL_ID", "0"))
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-USERS_GP_GIST_ID = os.environ.get("USERS_GP_GIST_ID", "")
-USERS_GP_FILE = os.environ.get("USERS_GP_FILE", "gp_user.json")
+UPSTASH_REDIS_REST_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
+UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 
 # =========================================================
 # RUTAS
@@ -119,42 +119,12 @@ CHANNEL_GROUP_MAP = {
 GROUP_CONFIG = {
     "Trainer": {
         "FORUM_CHANNEL_ID": 1497177430828384396,
-        "users_gist_id": "1c066922bc39ac136b6f234fad6d9420",
-        "users_filename": "trainer_users.json",
-        "online_gist_id": "4edcf4d341cd4f7d5d0fb8a50f8b8c3c",
-        "online_filename": "trainer_ids.txt",
-        "vip_gist_id": "16541fd83785a49ad4a0f22bbeb06000",
-        "vip_filename": "trainer_vip.txt",
-        "live_gist_id": "4f35f34b50e142fd4c89ff7bb8e30190",
-        "live_filename": "trainer_gp_live_stats.json",
-        "vote_gist_id": "7a91d04879b3b652b6a9a177e44f98c8",
-        "vote_file": "trainer_gp_votes.json",
     },
     "Gym_Leader": {
         "FORUM_CHANNEL_ID": 1496449812072108133,
-        "users_gist_id": "a3f5f3d8a2e6ddf2378fb3481dff49f6",
-        "users_filename": "gym_users.json",
-        "online_gist_id": "e110c37b3e0b8de83a33a1b0a5eb64e8",
-        "online_filename": "gym_ids.txt",
-        "vip_gist_id": "79a0e30c401cfd63e78d9ec5a9210091",
-        "vip_filename": "gym_vip.txt",
-        "live_gist_id": "931b1284bc6abffc6681f733ac4361ff",
-        "live_filename": "gym_gp_live_stats.json",
-        "vote_gist_id": "03b9697ea313c6e444a0d94d6929c999",
-        "vote_file": "gym_gp_votes.json",
     },
     "Elite_Four": {
         "FORUM_CHANNEL_ID": 1497179653276827720,
-        "users_gist_id": "bb18eda2ea748723d8fe0131dd740b70",
-        "users_filename": "elite_users.json",
-        "online_gist_id": "d9db3a72fed74c496fd6cc830f9ca6e9",
-        "online_filename": "elite_ids.txt",
-        "vip_gist_id": "5f2f23e0391882ab4e255bd67e98334a",
-        "vip_filename": "elite_vip.txt",
-        "live_gist_id": "4773653072f4851e91958a333e503de9",
-        "live_filename": "gp_live_stats.json",
-        "vote_gist_id": "20769d5b776e8aa238094befb4baefeb",
-        "vote_file": "elite_gp_votes.json",
     },
 }
 
@@ -571,85 +541,131 @@ async def download_attachment_to_file(att: discord.Attachment, save_path: Path) 
         logger.warning("No se pudo guardar attachment %s: %s", att.filename, e)
         return None
 
+
 # =========================================================
-# HELPERS GITHUB GIST
+# HELPERS UPSTASH REDIS
 # =========================================================
 
-async def github_get_gist(gist_id: str) -> dict:
-    url = f"https://api.github.com/gists/{gist_id}"
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json",
+def redis_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}",
     }
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as resp:
-            if resp.status != 200:
-                raise RuntimeError(f"GET gist failed {resp.status}: {gist_id}")
-            return await resp.json()
+
+def users_key(group: str) -> str:
+    return f"users:{group}"
 
 
-async def github_patch_gist_file(gist_id: str, filename: str, content: str) -> None:
-    url = f"https://api.github.com/gists/{gist_id}"
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "files": {
-            filename: {
-                "content": content
-            }
-        }
-    }
-
-    for attempt in range(3):
-        async with aiohttp.ClientSession() as session:
-            async with session.patch(url, headers=headers, json=payload) as resp:
-                if resp.status in (200, 201):
-                    return
-
-                text = await resp.text()
-
-                if resp.status == 403:
-                    logger.warning("Rate limit hit. Waiting before retry... (%s)", attempt)
-                    await asyncio.sleep(10 + attempt * 5)
-                    continue
-
-                raise RuntimeError(f"PATCH gist failed {resp.status}: {text}")
-
-    logger.error("Failed after retries (rate limit). Skipping save.")
+def online_key(group: str) -> str:
+    return f"online:{group}"
 
 
-async def gist_load_json(gist_id: str, filename: str, default):
+def vip_key(group: str) -> str:
+    return f"vip:{group}"
+
+
+def gp_users_key() -> str:
+    return "gp_users"
+
+
+def live_stats_key(group: str) -> str:
+    return f"gp_live_stats:{group}"
+
+
+def vote_state_key(group: str) -> str:
+    return f"gp_votes:{group}"
+
+
+def safe_json_loads(value, default):
     try:
-        data = await github_get_gist(gist_id)
-        file_obj = data.get("files", {}).get(filename)
-        if not file_obj or not file_obj.get("content"):
+        if value is None:
             return default
-        return json.loads(file_obj["content"])
-    except Exception as e:
-        logger.warning("gist_load_json error %s/%s: %s", gist_id, filename, e)
+        if isinstance(value, (dict, list)):
+            return value
+        return json.loads(value)
+    except Exception:
         return default
 
 
-async def gist_save_json(gist_id: str, filename: str, data) -> None:
-    await github_patch_gist_file(gist_id, filename, json.dumps(data, indent=2))
+async def redis_command(*parts):
+    if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
+        raise RuntimeError("Missing UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN")
+
+    encoded = "/".join(quote(str(p), safe="") for p in parts)
+    url = f"{UPSTASH_REDIS_REST_URL}/{encoded}"
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=redis_headers()) as resp:
+            text = await resp.text()
+
+            if resp.status not in (200, 201):
+                raise RuntimeError(f"Redis command failed {resp.status}: {text}")
+
+            data = json.loads(text)
+            return data.get("result")
 
 
-async def gist_load_text(gist_id: str, filename: Optional[str] = None) -> str:
-    data = await github_get_gist(gist_id)
-    files = data.get("files", {})
-    if filename:
-        file_obj = files.get(filename)
-        return file_obj.get("content", "") if file_obj else ""
+async def redis_get(key: str, default=None):
+    result = await redis_command("get", key)
+    if result is None:
+        return default
+    return result
 
-    # fallback: primer archivo
-    if not files:
-        return ""
-    first_key = next(iter(files))
-    return files[first_key].get("content", "")
+
+async def redis_set_json(key: str, data) -> None:
+    await redis_command("set", key, json.dumps(data))
+
+
+async def redis_get_json(key: str, default):
+    raw = await redis_get(key)
+    return safe_json_loads(raw, default)
+
+
+async def redis_hgetall_json(key: str) -> dict:
+    result = await redis_command("hgetall", key)
+
+    if not result:
+        return {}
+
+    # Upstash puede devolver dict o lista alternada dependiendo del comando/API.
+    if isinstance(result, dict):
+        items = result.items()
+    else:
+        items = zip(result[0::2], result[1::2])
+
+    out = {}
+
+    for field, value in items:
+        out[str(field)] = safe_json_loads(value, {})
+
+    return out
+
+
+async def redis_hset_json(key: str, field: str, value) -> None:
+    await redis_command("hset", key, field, json.dumps(value))
+
+
+async def redis_smembers_ids(key: str) -> List[str]:
+    result = await redis_command("smembers", key)
+
+    if not result:
+        return []
+
+    return [
+        str(x).strip()
+        for x in result
+        if re.fullmatch(r"\d{16}", str(x).strip())
+    ]
+
+
+async def redis_sadd_id(key: str, value: str) -> bool:
+    value = str(value or "").strip()
+
+    if not re.fullmatch(r"\d{16}", value):
+        return False
+
+    await redis_command("sadd", key, value)
+    return True
 
 async def collect_message_attachments(message: discord.Message) -> List[discord.File]:
     files: List[discord.File] = []
@@ -763,14 +779,10 @@ def extract_friend_id(content: str) -> Optional[str]:
     return None
     
 async def load_group_users(group: str) -> dict:
-    config = GROUP_CONFIG.get(group)
-    if not config:
+    if group not in GROUP_CONFIG:
         return {}
-    return await gist_load_json(
-        config["users_gist_id"],
-        config["users_filename"],
-        {}
-    )
+
+    return await redis_hgetall_json(users_key(group))
 
 
 
@@ -854,36 +866,30 @@ async def add_vip_id(friend_id: str, group: str) -> bool:
     if not friend_id:
         return False
 
-    config = GROUP_CONFIG.get(group)
-    if not config:
+    if group not in GROUP_CONFIG:
+        return False
+
+    friend_id = str(friend_id).strip()
+
+    if not re.fullmatch(r"\d{16}", friend_id):
+        logger.warning("VIP inválido, no se guarda: %s", friend_id)
         return False
 
     try:
-        content = await gist_load_text(config["vip_gist_id"], config["vip_filename"])
-        ids = [x.strip() for x in content.splitlines() if x.strip()]
-
-        if friend_id in ids:
-            logger.info("VIP ya existe en %s: %s", group, friend_id)
-            return False
-
-        ids.append(friend_id)
-        await github_patch_gist_file(
-            config["vip_gist_id"],
-            config["vip_filename"],
-            "\n".join(ids)
-        )
-        logger.info("VIP agregado en %s: %s", group, friend_id)
+        await redis_sadd_id(vip_key(group), friend_id)
+        logger.info("VIP agregado en Redis %s: %s", group, friend_id)
         return True
     except Exception as e:
-        logger.exception("add_vip_id error: %s", e)
+        logger.exception("add_vip_id Redis error: %s", e)
         return False
 
 async def load_users_gp() -> dict:
-    return await gist_load_json(USERS_GP_GIST_ID, USERS_GP_FILE, {})
+    return await redis_hgetall_json(gp_users_key())
 
 
 async def save_users_gp(data: dict) -> None:
-    await gist_save_json(USERS_GP_GIST_ID, USERS_GP_FILE, data)
+    for discord_id, value in data.items():
+        await redis_hset_json(gp_users_key(), str(discord_id), value)
 
 
 async def register_user_gp(owner_info: dict) -> None:
@@ -902,21 +908,19 @@ async def register_user_gp(owner_info: dict) -> None:
     data[discord_id]["gp"] += 1
     data[discord_id]["name"] = owner_info.get("display_name", "Unknown")
 
-    await save_users_gp(data)
+    await redis_hset_json(gp_users_key(), discord_id, data[discord_id])
 
 
 async def get_online_mentions(group: str) -> List[str]:
-    config = GROUP_CONFIG.get(group)
-    if not config:
+    if group not in GROUP_CONFIG:
         return []
 
     try:
-        online_text = await gist_load_text(config["online_gist_id"], config["online_filename"])
-        online_ids = [x.strip() for x in online_text.splitlines() if x.strip()]
-
+        online_ids = await redis_smembers_ids(online_key(group))
         users = await load_group_users(group)
 
         mentions = []
+
         for discord_id, user_info in users.items():
             main_id = str(user_info.get("main_id", "")).strip()
             sec_id = str(user_info.get("sec_id", "")).strip()
@@ -925,8 +929,9 @@ async def get_online_mentions(group: str) -> List[str]:
                 mentions.append(f"<@{discord_id}>")
 
         return mentions
+
     except Exception as e:
-        logger.exception("get_online_mentions error: %s", e)
+        logger.exception("get_online_mentions Redis error: %s", e)
         return []
 
 def get_utc6_date_string() -> str:
@@ -935,13 +940,11 @@ def get_utc6_date_string() -> str:
     return utc6.date().isoformat()
 
 async def load_live_stats(group: str) -> dict:
-    config = GROUP_CONFIG.get(group)
-    if not config:
+    if group not in GROUP_CONFIG:
         return {}
 
-    return await gist_load_json(
-        config["live_gist_id"],
-        config["live_filename"],
+    return await redis_get_json(
+        live_stats_key(group),
         {
             "totalGP": 0,
             "totalAlive": 0,
@@ -954,12 +957,10 @@ async def load_live_stats(group: str) -> dict:
 
 
 async def save_live_stats(group: str, stats: dict) -> None:
-    config = GROUP_CONFIG.get(group)
-    if not config:
+    if group not in GROUP_CONFIG:
         return
 
-    await gist_save_json(config["live_gist_id"], config["live_filename"], stats)
-
+    await redis_set_json(live_stats_key(group), stats)
 
 async def check_daily_reset(group: str, stats: dict) -> dict:
     today = get_utc6_date_string()
@@ -1313,27 +1314,18 @@ def process_gp_image(source_img: Image.Image, message_id: int, heartbeat_text: s
 # =========================================================
 
 async def load_vote_state(group: str) -> dict:
-    config = GROUP_CONFIG.get(group)
-    if not config:
+    if group not in GROUP_CONFIG:
         return {}
 
-    return await gist_load_json(
-        config["vote_gist_id"],
-        config["vote_file"],
-        {}
-    )
+    return await redis_get_json(vote_state_key(group), {})
 
 
 async def save_vote_state(group: str, data: dict) -> None:
-    config = GROUP_CONFIG.get(group)
-    if not config:
+    if group not in GROUP_CONFIG:
         return
 
-    await gist_save_json(
-        config["vote_gist_id"],
-        config["vote_file"],
-        data
-    )
+    await redis_set_json(vote_state_key(group), data)
+
 
 async def update_gp_thread_status(thread_id: int, status: str):
     try:
