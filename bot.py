@@ -784,7 +784,51 @@ async def load_group_users(group: str) -> dict:
 
     return await redis_hgetall_json(users_key(group))
 
+def normalize_name_for_match(value: str) -> str:
+    value = str(value or "").lower().strip()
+    value = value.replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
+    value = re.sub(r"[*_`~|>]", "", value)
+    value = re.sub(r"^@+", "", value)
+    value = re.sub(r"[:：]+$", "", value)
+    value = re.sub(r"[^\w]", "", value)
+    return value
 
+
+def get_user_name_candidates(user_data: dict) -> list:
+    names = [
+        user_data.get("name"),
+        user_data.get("heartbeatName"),
+        user_data.get("displayName"),
+        user_data.get("display_name"),
+        user_data.get("username"),
+    ]
+
+    aliases = user_data.get("aliases")
+    if isinstance(aliases, list):
+        names.extend(aliases)
+
+    return [str(x).strip() for x in names if str(x or "").strip()]
+
+
+def names_match(input_name: str, user_data: dict) -> bool:
+    clean_input = normalize_name_for_match(input_name)
+
+    if not clean_input:
+        return False
+
+    for candidate in get_user_name_candidates(user_data):
+        clean_candidate = normalize_name_for_match(candidate)
+
+        if not clean_candidate:
+            continue
+
+        if clean_candidate == clean_input:
+            return True
+
+        if clean_candidate in clean_input or clean_input in clean_candidate:
+            return True
+
+    return False
 
 async def resolve_gp_owner(client, content: str, group: str):
     """
@@ -823,22 +867,23 @@ async def resolve_gp_owner(client, content: str, group: str):
         user_data = users[owner_discord_id]
         return {
             "discord_id": owner_discord_id,
-            "display_name": user_data.get("name") or owner_discord_id,
+            "display_name": user_data.get("name") or user_data.get("heartbeatName") or owner_discord_id,
             "mention": f"<@{owner_discord_id}>",
         }
 
     # =========================
     # 4. BUSCAR POR NOMBRE EN GIST
     # =========================
+
     if username_hint:
         for uid, data in users.items():
-            if data.get("name", "").lower() == username_hint.lower():
+            if names_match(username_hint, data):
                 return {
                     "discord_id": uid,
-                    "display_name": data.get("name"),
+                    "display_name": data.get("name") or data.get("heartbeatName") or username_hint,
                     "mention": f"<@{uid}>",
                 }
-
+    
     # =========================
     # 5. BUSCAR EN DISCORD API
     # =========================
