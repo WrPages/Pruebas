@@ -1527,11 +1527,66 @@ intents.message_content = True
 
 client = discord.Client(intents=intents)
 
+async def restore_persistent_views():
+    logger.info("🔄 Restaurando botones GP...")
+
+    restored = 0
+
+    for group in GROUP_CONFIG.keys():
+        try:
+            vote_data = await load_vote_state(group)
+
+            for vote_key, state in vote_data.items():
+                try:
+                    view = GPVoteView(
+                        vote_key=str(vote_key),
+                        group=group
+                    )
+
+                    # restaurar labels actuales
+                    alive_count = len(state.get("alive_users", []))
+                    dead_count = len(state.get("dead_users", []))
+
+                    for child in view.children:
+                        if child.custom_id == "gp_alive":
+                            child.label = f"🟢 Alive ({alive_count})"
+
+                        elif child.custom_id == "gp_dead":
+                            child.label = f"🔴 Dead ({dead_count})"
+
+                        # si ya terminó la votación, deshabilitar
+                        if state.get("status") in ("alive", "dead"):
+                            child.disabled = True
+
+                    client.add_view(view)
+
+                    restored += 1
+
+                except Exception as e:
+                    logger.exception(
+                        "❌ Error restaurando view %s (%s): %s",
+                        vote_key,
+                        group,
+                        e
+                    )
+
+        except Exception as e:
+            logger.exception(
+                "❌ Error cargando vote state %s: %s",
+                group,
+                e
+            )
+
+    logger.info("✅ Views restauradas: %s", restored)
 
 @client.event
 async def on_ready():
     logger.info("Bot conectado como %s", client.user)
 
+    try:
+        await restore_persistent_views()
+    except Exception as e:
+        logger.exception("❌ restore_persistent_views failed: %s", e)
 
 @client.event
 async def on_message(message: discord.Message):
