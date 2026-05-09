@@ -1675,7 +1675,7 @@ async def on_message(message: discord.Message):
         if len(PROCESSED_MESSAGES) > 1000:
             PROCESSED_MESSAGES.clear()
 
-        #result = await asyncio.to_thread(process_gp_image, source_img, message.id, message.content)
+# result = await asyncio.to_thread(process_gp_image, source_img, message.id, message.content)
 
 if is_direct_gp_passthrough_image(source_img):
     logger.info(
@@ -1683,11 +1683,13 @@ if is_direct_gp_passthrough_image(source_img):
         message.id,
         source_img.size
     )
+
     result = process_direct_gp_passthrough(
         message.id,
         message.content,
         original_gp_image_path
     )
+
 else:
     result = await asyncio.to_thread(
         process_gp_image,
@@ -1695,7 +1697,8 @@ else:
         message.id,
         message.content
     )
-        group = get_group_from_channel(message.channel.id)
+
+group = get_group_from_channel(message.channel.id)
         if not group:
             logger.warning("Canal sin grupo configurado: %s", message.channel.id)
             return
