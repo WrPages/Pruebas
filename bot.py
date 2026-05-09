@@ -91,6 +91,8 @@ TRIGGER_PATTERNS = [
 
 VALID_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
 PROCESSED_MESSAGES = set()
+DIRECT_GP_WIDTH = 1060
+DIRECT_GP_HEIGHT = 300
 MAX_SCORE_ACCEPT = 2200
 MAX_SCORE_ACCEPT_WITH_GAP = 3600
 MIN_SCORE_GAP = 140
@@ -512,6 +514,43 @@ def attachment_looks_like_gp_grid(att: discord.Attachment) -> bool:
 async def download_pil_image(attachment: discord.Attachment) -> Image.Image:
     data = await attachment.read()
     return Image.open(io.BytesIO(data)).convert("RGBA")
+
+def is_direct_gp_passthrough_image(img: Image.Image) -> bool:
+    return img.size == (DIRECT_GP_WIDTH, DIRECT_GP_HEIGHT)
+
+
+def build_pack_label_from_meta(meta: dict) -> str:
+    pos = meta.get("pack_position")
+    if isinstance(pos, int) and 1 <= pos <= 5:
+        return f"[{pos}/5]"
+    return "[?/?]"
+
+
+def process_direct_gp_passthrough(
+    message_id: int,
+    heartbeat_text: str,
+    original_image_path: Path
+) -> dict:
+    meta = parse_heartbeat_metadata(heartbeat_text)
+    pack_label = build_pack_label_from_meta(meta)
+
+    return {
+        "two_star_count": 0,
+        "found_count": 5,
+        "overlay_path": None,
+        "debug_path": None,
+        "reply_text": "Direct GP image detected. Using original attachment without HD detection.",
+        "debug_lines": [
+            f"Direct passthrough enabled: first attachment is exactly {DIRECT_GP_WIDTH}x{DIRECT_GP_HEIGHT}.",
+            "HD detection was skipped."
+        ],
+        "files": [],
+        "pack_label": pack_label,
+        "heartbeat_meta": meta,
+        "final_image_path": original_image_path,
+        "has_invalid": False,
+        "direct_passthrough": True,
+    }
 
 async def get_best_gp_image_attachment(message: discord.Message) -> Optional[Tuple[discord.Attachment, Image.Image]]:
     image_attachments = [
@@ -1636,7 +1675,26 @@ async def on_message(message: discord.Message):
         if len(PROCESSED_MESSAGES) > 1000:
             PROCESSED_MESSAGES.clear()
 
-        result = await asyncio.to_thread(process_gp_image, source_img, message.id, message.content)
+        #result = await asyncio.to_thread(process_gp_image, source_img, message.id, message.content)
+
+        if is_direct_gp_passthrough_image(source_img):
+    logger.info(
+        "Direct passthrough image detected for message_id=%s with size=%s. Skipping HD detection.",
+        message.id,
+        source_img.size
+    )
+    result = process_direct_gp_passthrough(
+        message.id,
+        message.content,
+        original_gp_image_path
+    )
+else:
+    result = await asyncio.to_thread(
+        process_gp_image,
+        source_img,
+        message.id,
+        message.content
+    )
         group = get_group_from_channel(message.channel.id)
         if not group:
             logger.warning("Canal sin grupo configurado: %s", message.channel.id)
@@ -1653,10 +1711,14 @@ async def on_message(message: discord.Message):
 
         min_two_star = MIN_TWO_STAR_BY_GROUP.get(group, 0)
 
+
         is_valid_gp = (
-            not result.get("has_invalid", False)
-            and result.get("found_count", 0) == 5
-            and result.get("two_star_count", 0) >= min_two_star
+            result.get("direct_passthrough", False)
+            or (
+                not result.get("has_invalid", False)
+                and result.get("found_count", 0) == 5
+                and result.get("two_star_count", 0) >= min_two_star
+            )
         )
 
 
@@ -1796,6 +1858,10 @@ async def on_message(message: discord.Message):
                 original_files.append(
                     discord.File(str(original_gp_image_path), filename="gp_original.png")
                 )
+            elif result.get("direct_passthrough", False):
+                original_files.append(
+                    discord.File(str(result["final_image_path"]), filename="gp_original.png")
+                )
             elif result["final_image_path"] is not None:
                 original_files.append(
                     discord.File(str(result["final_image_path"]), filename="gp_hd.png")
@@ -1854,15 +1920,34 @@ async def on_message(message: discord.Message):
                     files=original_message_files if original_message_files else None
                 )
 
-                log_files = [
-                    discord.File(str(result["overlay_path"]), filename="box_overlay.png"),
-                    discord.File(str(result["debug_path"]), filename="gp_debug.png"),
-                ]
+                log_files = []
 
-                sent_log = await log_channel.send(
-                    content=log_summary,
-                    files=log_files
-                )
+                if result.get("direct_passthrough", False):
+                    passthrough_note = (
+                        f"{log_summary}\n"
+                        f"**Direct passthrough:** first attachment matched "
+                        f"exact size {DIRECT_GP_WIDTH}x{DIRECT_GP_HEIGHT}, so HD detection was skipped."
+                    )
+
+                    sent_log = await log_channel.send(
+                        content=passthrough_note
+                    )
+                else:
+                    if result.get("overlay_path"):
+                        log_files.append(
+                            discord.File(str(result["overlay_path"]), filename="box_overlay.png")
+                        )
+
+                    if result.get("debug_path"):
+                        log_files.append(
+                            discord.File(str(result["debug_path"]), filename="gp_debug.png")
+                        )
+
+                    sent_log = await log_channel.send(
+                        content=log_summary,
+                        files=log_files if log_files else None
+                    )
+                
 
                 asyncio.create_task(delete_message_later(sent_original, 172800))
                 asyncio.create_task(delete_message_later(sent_log, 172800))
