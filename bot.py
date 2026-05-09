@@ -1677,7 +1677,7 @@ async def on_message(message: discord.Message):
 
         #result = await asyncio.to_thread(process_gp_image, source_img, message.id, message.content)
 
-        if is_direct_gp_passthrough_image(source_img):
+if is_direct_gp_passthrough_image(source_img):
     logger.info(
         "Direct passthrough image detected for message_id=%s with size=%s. Skipping HD detection.",
         message.id,
