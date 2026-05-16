@@ -945,6 +945,112 @@ async def resolve_gp_owner(client, content: str, group: str):
         "display_name": username_hint or owner_discord_id or "unknown",
         "mention": f"<@{owner_discord_id}>" if owner_discord_id else "@unknown",
     }
+
+# =========================================================
+# RIVAL DUO HELPERS
+# =========================================================
+
+def rival_duos_key() -> str:
+    return "rival_duos"
+
+
+def rival_duo_by_gameid_key() -> str:
+    return "rival_duo_by_gameid"
+
+
+async def redis_hget_json(key: str, field: str, default=None):
+    try:
+        raw = await redis_command("hget", key, field)
+        return safe_json_loads(raw, default)
+    except Exception as e:
+        logger.warning("redis_hget_json error key=%s field=%s: %s", key, field, e)
+        return default
+
+
+async def get_rival_duo_by_id(duo_id: str):
+    if not duo_id:
+        return None
+
+    return await redis_hget_json(rival_duos_key(), str(duo_id), None)
+
+
+async def resolve_rival_duo_owner_by_game_id(game_id: str):
+    """
+    Busca si un ID de 16 dígitos pertenece a un Rival Duo.
+    Solo devuelve dueño válido si ese ID es el ID activo actual del Duo.
+    """
+    game_id = str(game_id or "").strip()
+
+    if not re.fullmatch(r"\d{16}", game_id):
+        return None
+
+    ref = await redis_hget_json(rival_duo_by_gameid_key(), game_id, None)
+
+    if not ref:
+        return None
+
+    duo_id = ref.get("duoId")
+    discord_id = str(ref.get("discordId") or "")
+
+    if not duo_id or not discord_id:
+        return None
+
+    duo = await get_rival_duo_by_id(duo_id)
+
+    if not duo:
+        return None
+
+    active_game_id = str(duo.get("activeGameId") or "").strip()
+
+    if active_game_id != game_id:
+        return None
+
+    members = duo.get("members") or {}
+    member = members.get(discord_id)
+
+    if not member:
+        return None
+
+    display_name = (
+        member.get("name")
+        or member.get("heartbeatName")
+        or discord_id
+    )
+
+    return {
+        "discord_id": discord_id,
+        "display_name": display_name,
+        "mention": f"<@{discord_id}>",
+        "duo_id": duo_id,
+        "duo_name": " & ".join(
+            [
+                (m.get("name") or m.get("heartbeatName") or uid)
+                for uid, m in members.items()
+            ]
+        ),
+        "game_id": game_id,
+    }
+
+
+async def get_rival_duo_mentions_from_online_ids(online_ids):
+    """
+    Devuelve menciones de Rival Duo usando SOLO el ID activo que está en online:Elite_Four.
+    No menciona a los dos, solo al dueño del ID activo.
+    """
+    mentions = []
+
+    for game_id in online_ids:
+        owner = await resolve_rival_duo_owner_by_game_id(game_id)
+
+        if not owner:
+            continue
+
+        mention = owner.get("mention")
+
+        if mention and mention not in mentions:
+            mentions.append(mention)
+
+    return mentions
     
 async def add_vip_id(friend_id: str, group: str) -> bool:
     if not friend_id:
@@ -1011,6 +1117,13 @@ async def get_online_mentions(group: str) -> List[str]:
 
             if main_id in online_ids or (sec_id and sec_id in online_ids):
                 mentions.append(f"<@{discord_id}>")
+
+        if group == "Elite_Four":
+            duo_mentions = await get_rival_duo_mentions_from_online_ids(online_ids)
+
+            for mention in duo_mentions:
+                if mention not in mentions:
+                    mentions.append(mention)
 
         return mentions
 
@@ -1703,14 +1816,35 @@ async def on_message(message: discord.Message):
             logger.warning("Canal sin grupo configurado: %s", message.channel.id)
             return
 
+
+
         owner_info = await resolve_gp_owner(client, message.content, group)
         friend_id = result["heartbeat_meta"].get("game_id") or extract_friend_id(message.content)
         logger.info("Extracted VIP friend_id=%s from message_id=%s", friend_id, message.id)
+
+        if group == "Elite_Four" and friend_id:
+            rival_owner = await resolve_rival_duo_owner_by_game_id(friend_id)
+
+            if rival_owner:
+                logger.info(
+                    "Rival Duo GP owner override: friend_id=%s discord_id=%s duo=%s",
+                    friend_id,
+                    rival_owner.get("discord_id"),
+                    rival_owner.get("duo_name"),
+                )
+
+                owner_info = {
+                    "discord_id": rival_owner.get("discord_id"),
+                    "display_name": rival_owner.get("display_name"),
+                    "mention": rival_owner.get("mention"),
+                }
 
         # Enriquecer meta para el post
         result["heartbeat_meta"]["owner_discord_id"] = owner_info.get("discord_id")
         result["heartbeat_meta"]["owner_display_name"] = owner_info.get("display_name")
         result["heartbeat_meta"]["owner_mention"] = owner_info.get("mention")
+
+        
 
         min_two_star = MIN_TWO_STAR_BY_GROUP.get(group, 0)
 
