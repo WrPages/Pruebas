@@ -1066,12 +1066,75 @@ async def add_vip_id(friend_id: str, group: str) -> bool:
         return False
 
     try:
-        await redis_sadd_id(vip_key(group), friend_id)
-        logger.info("VIP agregado en Redis %s: %s", group, friend_id)
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+
+        # Guardar ID + timestamp
+        await redis_command(
+            "hset",
+            vip_key(group),
+            friend_id,
+            now_ts
+        )
+
+        logger.info(
+            "VIP agregado en Redis %s: %s | ts=%s",
+            group,
+            friend_id,
+            now_ts
+        )
+
         return True
+
     except Exception as e:
         logger.exception("add_vip_id Redis error: %s", e)
         return False
+
+async def cleanup_expired_vips(group: str):
+    """
+    Elimina VIPs que tengan más de 48 horas.
+    SOLO elimina individualmente los expirados.
+    """
+
+    try:
+        vip_data = await redis_command("hgetall", vip_key(group))
+
+        if not vip_data:
+            return
+
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        expire_seconds = 48 * 60 * 60  # 48 horas
+
+        # Upstash puede devolver lista alternada
+        items = zip(vip_data[0::2], vip_data[1::2])
+
+        for friend_id, saved_ts in items:
+            try:
+                saved_ts = int(saved_ts)
+
+                age = now_ts - saved_ts
+
+                if age >= expire_seconds:
+                    await redis_command(
+                        "hdel",
+                        vip_key(group),
+                        friend_id
+                    )
+
+                    logger.info(
+                        "VIP expirado eliminado %s -> %s",
+                        group,
+                        friend_id
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    "Error revisando VIP %s: %s",
+                    friend_id,
+                    e
+                )
+
+    except Exception as e:
+        logger.exception("cleanup_expired_vips error: %s", e)
 
 async def load_users_gp() -> dict:
     return await redis_hgetall_json(gp_users_key())
@@ -1812,6 +1875,8 @@ async def on_message(message: discord.Message):
             )
 
         group = get_group_from_channel(message.channel.id)
+        # limpiar VIPs expirados
+        await cleanup_expired_vips(group)
         if not group:
             logger.warning("Canal sin grupo configurado: %s", message.channel.id)
             return
