@@ -1887,7 +1887,7 @@ async def on_message(message: discord.Message):
                 message.content
             )
 
-        group = get_group_from_channel(message.channel.id
+        group = get_group_from_channel(message.channel.id)
         # limpiar VIPs expirados
         await cleanup_expired_vips(group)
         if not group:
