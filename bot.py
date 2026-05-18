@@ -1066,21 +1066,27 @@ async def add_vip_id(friend_id: str, group: str) -> bool:
         return False
 
     try:
+        # =====================================================
+        # 1. AGREGAR AL SET VIP NORMAL (NO ROMPE TU SISTEMA)
+        # =====================================================
+        await redis_sadd_id(vip_key(group), friend_id)
+
+        # =====================================================
+        # 2. GUARDAR TIMESTAMP APARTE
+        # =====================================================
         now_ts = int(datetime.now(timezone.utc).timestamp())
 
-        # Guardar ID + timestamp
         await redis_command(
             "hset",
-            vip_key(group),
+            f"{vip_key(group)}:timestamps",
             friend_id,
             now_ts
         )
 
         logger.info(
-            "VIP agregado en Redis %s: %s | ts=%s",
+            "VIP agregado %s -> %s",
             group,
-            friend_id,
-            now_ts
+            friend_id
         )
 
         return True
@@ -1091,32 +1097,39 @@ async def add_vip_id(friend_id: str, group: str) -> bool:
 
 async def cleanup_expired_vips(group: str):
     """
-    Elimina VIPs que tengan más de 48 horas.
-    SOLO elimina individualmente los expirados.
+    Elimina SOLO IDs VIP que tengan más de 48h.
     """
 
     try:
-        vip_data = await redis_command("hgetall", vip_key(group))
+        ts_key = f"{vip_key(group)}:timestamps"
+
+        vip_data = await redis_command("hgetall", ts_key)
 
         if not vip_data:
             return
 
         now_ts = int(datetime.now(timezone.utc).timestamp())
-        expire_seconds = 48 * 60 * 60  # 48 horas
+        expire_seconds = 48 * 60 * 60
 
-        # Upstash puede devolver lista alternada
         items = zip(vip_data[0::2], vip_data[1::2])
 
         for friend_id, saved_ts in items:
             try:
                 saved_ts = int(saved_ts)
 
-                age = now_ts - saved_ts
+                if (now_ts - saved_ts) >= expire_seconds:
 
-                if age >= expire_seconds:
+                    # borrar del set VIP original
+                    await redis_command(
+                        "srem",
+                        vip_key(group),
+                        friend_id
+                    )
+
+                    # borrar timestamp
                     await redis_command(
                         "hdel",
-                        vip_key(group),
+                        ts_key,
                         friend_id
                     )
 
@@ -1128,7 +1141,7 @@ async def cleanup_expired_vips(group: str):
 
             except Exception as e:
                 logger.warning(
-                    "Error revisando VIP %s: %s",
+                    "Error limpiando VIP %s: %s",
                     friend_id,
                     e
                 )
@@ -1874,7 +1887,7 @@ async def on_message(message: discord.Message):
                 message.content
             )
 
-        group = get_group_from_channel(message.channel.id)
+        group = get_group_from_channel(message.channel.id
         # limpiar VIPs expirados
         await cleanup_expired_vips(group)
         if not group:
