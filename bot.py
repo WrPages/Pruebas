@@ -1335,7 +1335,7 @@ def build_forum_post_text(meta: dict, pack_label: str, online_mentions: List[str
     return (
         "```"
         f"GP found by {obtainer}\n"
-        f"{pack_label}{packs_text}[{meta.get('pack_name') or 'UnknownPack'}]\n"
+        f"{pack_label}{packs_text}[{meta.get('pack_name') or 'PulsingAura'}]\n"
         f"{bot_name} ({game_id})\n"
         f"{filename}\n"
         f"{active_text}"
@@ -1364,7 +1364,7 @@ def build_forum_info_panel(meta: dict, pack_label: str, online_mentions: List[st
     return (
         "```"
         f"GP found by {obtainer}\n"
-        f"{pack_label}{packs_text}[{meta.get('pack_name') or 'UnknownPack'}]\n"
+        f"{pack_label}{packs_text}[{meta.get('pack_name') or 'PulsingAura'}]\n"
         f"{bot_name} ({game_id})\n"
         f"{filename}"
         "```\n"
@@ -1453,7 +1453,7 @@ def build_log_summary(meta: dict, pack_label: str, debug_lines: List[str]) -> st
         f"```"
         f"{obtainer}\n"
         f"{bot_name} ({game_id})\n"
-        f"{pack_label}{packs_text}[{meta.get('pack_name') or 'UnknownPack'}]\n"
+        f"{pack_label}{packs_text}[{meta.get('pack_name') or 'PulsingAura'}]\n"
         f"{filename}\n\n"
         + "\n".join(slot_lines) +
         f"```"
